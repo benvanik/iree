@@ -51,13 +51,20 @@ enum iree_hal_numerical_type_bits_t {
 };
 typedef uint8_t iree_hal_numerical_type_t;
 
-#define IREE_HAL_ELEMENT_TYPE_VALUE(numerical_type, bit_count) \
-  (((uint32_t)(numerical_type) << 24) | (uint32_t)(bit_count))
+#define IREE_HAL_ELEMENT_TYPE_VALUE(numerical_type, logical_bit_count, \
+                                    physical_bit_count,                \
+                                    elements_per_physical_word)        \
+  (((uint32_t)(numerical_type) << 24) |                                \
+   ((uint32_t)(elements_per_physical_word)) << 16 |                    \
+   ((uint32_t)(physical_bit_count) << 8) | (uint32_t)(logical_bit_count))
 
 // Composes an iree_hal_element_type_t value with the given attributes.
-#define iree_hal_make_element_type(numerical_type, bit_count) \
-  (iree_hal_element_type_t)(                                  \
-      IREE_HAL_ELEMENT_TYPE_VALUE(numerical_type, bit_count))
+#define iree_hal_make_element_type(numerical_type, logical_bit_count, \
+                                   physical_bit_count,                \
+                                   elements_per_physical_word)        \
+  (iree_hal_element_type_t)(IREE_HAL_ELEMENT_TYPE_VALUE(              \
+      numerical_type, logical_bit_count, physical_bit_count,          \
+      elements_per_physical_word))
 
 // Returns the numerical type of the element, if known and not opaque.
 #define iree_hal_element_numerical_type(element_type) \
@@ -88,66 +95,71 @@ typedef uint8_t iree_hal_numerical_type_t;
   iree_all_bits_set(iree_hal_element_numerical_type(element_type),     \
                     IREE_HAL_NUMERICAL_TYPE_FLOAT_COMPLEX)
 
-// TODO(#8193): split out logical and physical bit widths.
 // Returns the bit width of each element.
-#define iree_hal_element_bit_count(element_type) \
+#define iree_hal_element_logical_bit_count(element_type) \
   (iree_host_size_t)((element_type)&0xFF)
+#define iree_hal_element_physical_bit_count(element_type) \
+  (iree_host_size_t)(((element_type) >> 8) & 0xFF)
+#define iree_hal_elements_per_physical_word(element_type) \
+  (iree_host_size_t)(((element_type) >> 16) & 0xFF)
 
 // Returns true if the element is byte-aligned.
 // Sub-byte aligned types such as i4 require user handling of the packing.
 #define iree_hal_element_is_byte_aligned(element_type) \
-  (iree_hal_element_bit_count(element_type) % 8 == 0)
+  (iree_hal_element_logical_bit_count(element_type) % 8 == 0)
 
 // Returns the number of bytes each |element_type| consumes in memory.
 // This is only valid when the encoding type is dense as sub-byte bit widths
 // may be packed in various forms (for example, i4 may be stored as nibbles
 // where each byte in memory contains two elements).
-#define iree_hal_element_dense_byte_count(element_type) \
-  ((iree_hal_element_bit_count(element_type) + 8 - 1) / 8)
+// As this is a big footgun it is likely to be removed in the future to
+// discourage assumptions around byte alignment/unpacked element data.
+#define iree_hal_element_dense_byte_count_unsafe(element_type) \
+  ((iree_hal_element_logical_bit_count(element_type) + 8 - 1) / 8)
 
 // Returns true if the given |element_type| represents an integer of exactly
 // |bit_width|. This ignores the signedness of the integer type.
 #define iree_hal_element_type_is_integer(element_type, bit_width) \
   (iree_hal_element_numerical_type_is_integer(element_type) &&    \
-   iree_hal_element_bit_count(element_type) == (bit_width))
+   iree_hal_element_logical_bit_count(element_type) == (bit_width))
 
 // Defines the element type of a buffer in a standard format.
 //
 // Composed as a 32-bit bitfield to allow for opaque data types. Use
 // iree_hal_make_element_type to make a bitfield with the appropriate ordering.
 //
-//   MSB ----------------------------------------------- LSB
-//   [numerical type] [reserved] [reserved] [number of bits]
+//   MSB ---------------------------------------------------------------- LSB
+//   [numerical type] [elements/physical word] [physical bits] [logical bits]
 //
 // clang-format off
 enum iree_hal_element_types_t {
-  IREE_HAL_ELEMENT_TYPE_NONE               = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,             0),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_OPAQUE_8           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,             8),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_OPAQUE_16          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,            16),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_OPAQUE_32          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,            32),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_OPAQUE_64          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,            64),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_BOOL_8             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_BOOLEAN,             8),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_INT_4              = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,             4),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_SINT_4             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,      4),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_UINT_4             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,    4),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_INT_8              = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,             8),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_SINT_8             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,      8),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_UINT_8             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,    8),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_INT_16             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,            16),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_SINT_16            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,     16),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_UINT_16            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,   16),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_INT_32             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,            32),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_SINT_32            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,     32),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_UINT_32            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,   32),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_INT_64             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,            64),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_SINT_64            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,     64),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_UINT_64            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,   64),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_FLOAT_16           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE,         16),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_FLOAT_32           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE,         32),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_FLOAT_64           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE,         64),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_BFLOAT_16          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_BRAIN,        16),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_64   = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_COMPLEX,      64),  // NOLINT
-  IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_128  = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_COMPLEX,     128),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_NONE               = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,             0,   0, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_OPAQUE_8           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,             8,   8, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_OPAQUE_16          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,            16,  16, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_OPAQUE_32          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,            32,  32, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_OPAQUE_64          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_UNKNOWN,            64,  64, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_BOOL_8             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_BOOLEAN,             1,   8, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_INT_4              = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,             4,   8, 2),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_SINT_4             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,      4,   8, 2),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_UINT_4             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,    4,   8, 2),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_INT_8              = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,             8,   8, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_SINT_8             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,      8,   8, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_UINT_8             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,    8,   8, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_INT_16             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,            16,  16, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_SINT_16            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,     16,  16, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_UINT_16            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,   16,  16, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_INT_32             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,            32,  32, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_SINT_32            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,     32,  32, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_UINT_32            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,   32,  32, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_INT_64             = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER,            64,  64, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_SINT_64            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_SIGNED,     64,  64, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_UINT_64            = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_INTEGER_UNSIGNED,   64,  64, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_FLOAT_16           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE,         16,  16, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_FLOAT_32           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE,         32,  32, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_FLOAT_64           = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE,         64,  64, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_BFLOAT_16          = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_BRAIN,        16,  16, 1),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_64   = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_COMPLEX,      32,  64, 2),  // NOLINT
+  IREE_HAL_ELEMENT_TYPE_COMPLEX_FLOAT_128  = IREE_HAL_ELEMENT_TYPE_VALUE(IREE_HAL_NUMERICAL_TYPE_FLOAT_COMPLEX,      64, 128, 2),  // NOLINT
 };
 typedef uint32_t iree_hal_element_type_t;
 // clang-format on
@@ -241,14 +253,6 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_shape(
     const iree_hal_buffer_view_t* buffer_view, iree_host_size_t rank_capacity,
     iree_hal_dim_t* out_shape, iree_host_size_t* out_shape_rank);
 
-// Performs a **metadata update-only** reshape.
-// The new rank and element count must match the existing values. The buffer
-// contents are left untouched; if the buffer is not dense this may make the
-// contents undefined.
-IREE_API_EXPORT iree_status_t iree_hal_buffer_view_reshape(
-    iree_hal_buffer_view_t* buffer_view, const iree_hal_dim_t* shape,
-    iree_host_size_t shape_rank);
-
 // Returns the total number of elements stored in the view.
 IREE_API_EXPORT iree_host_size_t
 iree_hal_buffer_view_element_count(const iree_hal_buffer_view_t* buffer_view);
@@ -257,17 +261,13 @@ iree_hal_buffer_view_element_count(const iree_hal_buffer_view_t* buffer_view);
 IREE_API_EXPORT iree_hal_element_type_t
 iree_hal_buffer_view_element_type(const iree_hal_buffer_view_t* buffer_view);
 
-// Returns the size of each element in the buffer view in bytes.
-// Note that not all buffers are contiguous or densely packed.
-IREE_API_EXPORT iree_host_size_t
-iree_hal_buffer_view_element_size(const iree_hal_buffer_view_t* buffer_view);
-
 // Returns the encoding type of the buffer.
 IREE_API_EXPORT iree_hal_encoding_type_t
 iree_hal_buffer_view_encoding_type(const iree_hal_buffer_view_t* buffer_view);
 
 // Returns the total size of the specified view in bytes.
-// Note that not all buffers are contiguous or densely packed.
+// Note that not all buffers are contiguous or densely packed and this may
+// including padding.
 IREE_API_EXPORT iree_device_size_t
 iree_hal_buffer_view_byte_length(const iree_hal_buffer_view_t* buffer_view);
 

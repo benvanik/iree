@@ -614,7 +614,7 @@ TEST(ElementTypeStringUtilTest, ParseElementType) {
               IsOkAndHolds(Eq(IREE_HAL_ELEMENT_TYPE_OPAQUE_64)));
   EXPECT_THAT(ParseElementType("f4"),
               IsOkAndHolds(Eq(iree_hal_make_element_type(
-                  IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE, 4))));
+                  IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE, 4, 8, 2))));
 }
 
 TEST(ElementTypeStringUtilTest, ParseElementTypeInvalid) {
@@ -640,7 +640,7 @@ TEST(ElementTypeStringUtilTest, FormatElementType) {
   EXPECT_THAT(FormatElementType(IREE_HAL_ELEMENT_TYPE_OPAQUE_64),
               IsOkAndHolds(Eq("*64")));
   EXPECT_THAT(FormatElementType(iree_hal_make_element_type(
-                  IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE, 4)),
+                  IREE_HAL_NUMERICAL_TYPE_FLOAT_IEEE, 4, 8, 2)),
               IsOkAndHolds(Eq("f4")));
 }
 

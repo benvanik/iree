@@ -76,7 +76,8 @@ static iree_status_t iree_io_parameter_info_from_string(
       shape_type, IREE_ARRAYSIZE(shape), &shape_rank, shape,
       &out_info->element_type));
 
-  if (IREE_UNLIKELY(iree_hal_element_bit_count(out_info->element_type) == 0) ||
+  if (IREE_UNLIKELY(
+          iree_hal_element_numerical_type_is_opaque(out_info->element_type)) ||
       IREE_UNLIKELY(
           !iree_hal_element_is_byte_aligned(out_info->element_type))) {
     return iree_make_status(

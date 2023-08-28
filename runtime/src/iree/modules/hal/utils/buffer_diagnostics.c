@@ -119,8 +119,8 @@ static bool iree_hal_element_types_are_compatible(
 
   if (iree_hal_element_numerical_type_is_integer(actual_type) &&
       iree_hal_element_numerical_type_is_integer(expected_type) &&
-      iree_hal_element_bit_count(actual_type) ==
-          iree_hal_element_bit_count(expected_type)) {
+      iree_hal_element_logical_bit_count(actual_type) ==
+          iree_hal_element_logical_bit_count(expected_type)) {
     // Integer types of the same bit width are allowed to be cast.
     // This allows users or the compiler to treat data as signless while still
     // allowing signedness. For example, tensor<1xi32> can successfully match

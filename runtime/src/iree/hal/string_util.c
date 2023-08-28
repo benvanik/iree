@@ -126,7 +126,7 @@ IREE_API_EXPORT iree_status_t iree_hal_parse_element_type(
   iree_hal_numerical_type_t numerical_type = IREE_HAL_NUMERICAL_TYPE_UNKNOWN;
   if (iree_string_view_equal(str_value, IREE_SV("i1"))) {
     numerical_type = IREE_HAL_NUMERICAL_TYPE_BOOLEAN;
-    *out_element_type = iree_hal_make_element_type(numerical_type, 8);
+    *out_element_type = iree_hal_make_element_type(numerical_type, 1, 8, 1);
     return iree_ok_status();
   } else if (iree_string_view_consume_prefix(&str_value, IREE_SV("i"))) {
     numerical_type = IREE_HAL_NUMERICAL_TYPE_INTEGER;
@@ -157,7 +157,9 @@ IREE_API_EXPORT iree_status_t iree_hal_parse_element_type(
                             value.data);
   }
 
-  *out_element_type = iree_hal_make_element_type(numerical_type, bit_count);
+  // DO NOT SUBMIT round up elements per physical
+  *out_element_type =
+      iree_hal_make_element_type(numerical_type, bit_count, bit_count, 1);
   return iree_ok_status();
 }
 
@@ -168,11 +170,9 @@ IREE_API_EXPORT iree_status_t iree_hal_format_element_type(
     *out_buffer_length = 0;
   }
   const char* prefix;
-  int32_t bit_count = (int32_t)iree_hal_element_bit_count(element_type);
   switch (iree_hal_element_numerical_type(element_type)) {
     case IREE_HAL_NUMERICAL_TYPE_BOOLEAN:
       prefix = "i";
-      bit_count = 1;
       break;
     case IREE_HAL_NUMERICAL_TYPE_INTEGER:
       prefix = "i";
@@ -196,7 +196,9 @@ IREE_API_EXPORT iree_status_t iree_hal_format_element_type(
       prefix = "*";
       break;
   }
-  int n = snprintf(buffer, buffer_capacity, "%s%d", prefix, bit_count);
+  int32_t logical_bit_count =
+      (int32_t)iree_hal_element_logical_bit_count(element_type);
+  int n = snprintf(buffer, buffer_capacity, "%s%d", prefix, logical_bit_count);
   if (n < 0) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION, "snprintf failed");
   }
@@ -393,7 +395,7 @@ static iree_status_t iree_hal_parse_element_unsafe(
     default: {
       // Treat any unknown format as binary.
       iree_host_size_t element_size =
-          iree_hal_element_dense_byte_count(element_type);
+          iree_hal_element_dense_byte_count_unsafe(element_type);
       if (data_str.size != element_size * 2) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "binary hex element count mismatch: buffer "
@@ -410,7 +412,7 @@ IREE_API_EXPORT iree_status_t iree_hal_parse_element(
     iree_string_view_t data_str, iree_hal_element_type_t element_type,
     iree_byte_span_t data_ptr) {
   iree_host_size_t element_size =
-      iree_hal_element_dense_byte_count(element_type);
+      iree_hal_element_dense_byte_count_unsafe(element_type);
   if (data_ptr.data_length < element_size) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "output data buffer overflow: data_length=%" PRIhsz
@@ -452,7 +454,7 @@ IREE_API_EXPORT iree_status_t iree_hal_format_element(
     iree_host_size_t buffer_capacity, char* buffer,
     iree_host_size_t* out_buffer_length) {
   iree_host_size_t element_size =
-      iree_hal_element_dense_byte_count(element_type);
+      iree_hal_element_dense_byte_count_unsafe(element_type);
   if (data.data_length < element_size) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "data buffer underflow: data_length=%" PRIhsz
@@ -538,7 +540,7 @@ IREE_API_EXPORT iree_status_t iree_hal_parse_buffer_elements(
     iree_string_view_t data_str, iree_hal_element_type_t element_type,
     iree_byte_span_t data_ptr) {
   iree_host_size_t element_size =
-      iree_hal_element_dense_byte_count(element_type);
+      iree_hal_element_dense_byte_count_unsafe(element_type);
   iree_host_size_t element_capacity = data_ptr.data_length / element_size;
   if (iree_string_view_is_empty(data_str)) {
     memset(data_ptr.data, 0, data_ptr.data_length);
@@ -632,7 +634,7 @@ static iree_status_t iree_hal_format_buffer_elements_recursive(
       dim_length *= shape[i];
     }
     iree_device_size_t dim_stride =
-        dim_length * iree_hal_element_dense_byte_count(element_type);
+        dim_length * iree_hal_element_dense_byte_count_unsafe(element_type);
     if (data.data_length < dim_stride * shape[0]) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
@@ -663,7 +665,7 @@ static iree_status_t iree_hal_format_buffer_elements_recursive(
     iree_host_size_t max_count =
         iree_min(*max_element_count, (iree_host_size_t)shape[0]);
     iree_device_size_t element_stride =
-        iree_hal_element_dense_byte_count(element_type);
+        iree_hal_element_dense_byte_count_unsafe(element_type);
     if (data.data_length < max_count * element_stride) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,

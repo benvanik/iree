@@ -250,8 +250,8 @@ static iree_status_t iree_numpy_descr_to_element_type(
                             "invalid descr byte width");
   }
 
-  *out_element_type =
-      IREE_HAL_ELEMENT_TYPE_VALUE(numerical_type, byte_width * 8);
+  *out_element_type = iree_hal_make_element_type(numerical_type, byte_width * 8,
+                                                 byte_width * 8, 1);
   return iree_ok_status();
 }
 
@@ -391,15 +391,23 @@ static iree_status_t iree_numpy_npy_build_dtype(
     iree_hal_buffer_view_t* buffer_view, iree_string_builder_t* builder) {
   iree_hal_element_type_t element_type =
       iree_hal_buffer_view_element_type(buffer_view);
-  iree_hal_numerical_type_t numerical_type =
-      iree_hal_element_numerical_type(element_type);
-  iree_host_size_t byte_count = iree_hal_element_dense_byte_count(element_type);
+  if (IREE_UNLIKELY(!iree_hal_element_is_byte_aligned(element_type))) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "sub-byte aligned element types cannot be represented in numpy yet");
+  }
 
   // Always little-endian, but 1 byte elements don't apply.
+  // NOTE: iree_hal_element_dense_byte_count_unsafe is incorrect when element
+  // types are sub-byte-aligned or packed.
+  iree_host_size_t byte_count =
+      iree_hal_element_dense_byte_count_unsafe(element_type);
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(builder, byte_count == 1 ? "|" : "<"));
 
   // Type prefix.
+  iree_hal_numerical_type_t numerical_type =
+      iree_hal_element_numerical_type(element_type);
   switch (numerical_type) {
     case IREE_HAL_NUMERICAL_TYPE_UNKNOWN: {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(builder, "V"));

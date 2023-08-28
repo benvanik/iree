@@ -38,6 +38,11 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_create(
 
   IREE_TRACE_ZONE_BEGIN(z0);
 
+  iree_device_size_t allocation_size = 0;
+  IREE_RETURN_AND_END_ZONE_IF_ERROR(
+      z0, iree_hal_buffer_compute_view_size(shape_rank, shape, element_type,
+                                            encoding_type, &allocation_size));
+
   // Allocate and initialize the iree_hal_buffer_view_t struct.
   // Note that we have the dynamically-sized shape dimensions on the end.
   iree_hal_buffer_view_t* buffer_view = NULL;
@@ -52,8 +57,7 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_create(
     iree_hal_buffer_retain(buffer_view->buffer);
     buffer_view->element_type = element_type;
     buffer_view->encoding_type = encoding_type;
-    buffer_view->byte_length =
-        iree_hal_element_dense_byte_count(buffer_view->element_type);
+    buffer_view->byte_length = allocation_size;
     buffer_view->shape_rank = shape_rank;
     for (iree_host_size_t i = 0; i < shape_rank; ++i) {
       buffer_view->shape[i] = shape[i];
@@ -159,53 +163,10 @@ IREE_API_EXPORT iree_status_t iree_hal_buffer_view_shape(
   return iree_ok_status();
 }
 
-IREE_API_EXPORT iree_status_t iree_hal_buffer_view_reshape(
-    iree_hal_buffer_view_t* buffer_view, const iree_hal_dim_t* shape,
-    iree_host_size_t shape_rank) {
-  IREE_ASSERT_ARGUMENT(buffer_view);
-  IREE_ASSERT_ARGUMENT(shape);
-
-  if (shape_rank != buffer_view->shape_rank) {
-    // Rank changes require reallocation of the structure as we inline the
-    // shape dimensions. We could lighten this restriction to allow for rank
-    // reduction but knowing that rank changes aren't allowed is easier than
-    // remembering all the conditions in which they may be.
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "buffer view reshapes must have the same rank; "
-                            "target=%" PRIhsz " , existing=%" PRIhsz,
-                            shape_rank, buffer_view->shape_rank);
-  }
-
-  iree_device_size_t new_element_count = 1;
-  for (iree_host_size_t i = 0; i < shape_rank; ++i) {
-    new_element_count *= shape[i];
-  }
-  iree_device_size_t old_element_count =
-      iree_hal_buffer_view_element_count(buffer_view);
-  if (new_element_count != old_element_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "buffer view reshapes must have the same element "
-                            "count; target=%" PRIdsz ", existing=%" PRIdsz,
-                            new_element_count, old_element_count);
-  }
-
-  for (iree_host_size_t i = 0; i < shape_rank; ++i) {
-    buffer_view->shape[i] = shape[i];
-  }
-
-  return iree_ok_status();
-}
-
 IREE_API_EXPORT iree_hal_element_type_t
 iree_hal_buffer_view_element_type(const iree_hal_buffer_view_t* buffer_view) {
   IREE_ASSERT_ARGUMENT(buffer_view);
   return buffer_view->element_type;
-}
-
-IREE_API_EXPORT iree_host_size_t
-iree_hal_buffer_view_element_size(const iree_hal_buffer_view_t* buffer_view) {
-  IREE_ASSERT_ARGUMENT(buffer_view);
-  return iree_hal_element_dense_byte_count(buffer_view->element_type);
 }
 
 IREE_API_EXPORT iree_hal_encoding_type_t

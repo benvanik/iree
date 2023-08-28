@@ -4,11 +4,36 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree/tooling/buffer_view_matchers.h"
-
 #include <math.h>
 
 #include "iree/base/internal/math.h"
+#include "iree/tooling/buffer_view_matchers.h"
+
+//===----------------------------------------------------------------------===//
+// Utilities
+//===----------------------------------------------------------------------===//
+
+// Returns OK if the given |buffer_view| is supported by the comparison tooling.
+static iree_status_t iree_tooling_check_comparison_support(
+    iree_hal_element_type_t element_type,
+    iree_hal_encoding_type_t encoding_type) {
+  if (iree_hal_element_numerical_type_is_opaque(element_type)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "opaque element types not yet supported for matching");
+  }
+  if (!iree_hal_element_is_byte_aligned(element_type)) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "non-byte-aligned element types not yet supported for matching");
+  }
+  if (encoding_type != IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "non-dense encodings not yet supported for matching");
+  }
+  return iree_ok_status();
+}
 
 //===----------------------------------------------------------------------===//
 // iree_hal_buffer_equality_t
@@ -18,7 +43,7 @@ static iree_hal_buffer_element_t iree_hal_buffer_element_at(
     iree_hal_element_type_t element_type, iree_const_byte_span_t elements,
     iree_host_size_t index) {
   iree_host_size_t element_size =
-      iree_hal_element_dense_byte_count(element_type);
+      iree_hal_element_dense_byte_count_unsafe(element_type);
   iree_const_byte_span_t element_data = iree_make_const_byte_span(
       elements.data + index * element_size, element_size);
   iree_hal_buffer_element_t element = {
@@ -33,8 +58,8 @@ static iree_status_t iree_hal_append_element_string(
   char temp[64];
   iree_host_size_t temp_length = 0;
   IREE_RETURN_IF_ERROR(iree_hal_format_element(
-      iree_make_const_byte_span(value.storage,
-                                iree_hal_element_dense_byte_count(value.type)),
+      iree_make_const_byte_span(
+          value.storage, iree_hal_element_dense_byte_count_unsafe(value.type)),
       value.type, sizeof(temp), temp, &temp_length));
   return iree_string_builder_append_string(
       builder, iree_make_string_view(temp, temp_length));
@@ -61,7 +86,7 @@ static bool iree_hal_compare_strided_elements_exact(
     iree_const_byte_span_t actual_elements, iree_host_size_t actual_stride,
     iree_host_size_t* out_index) {
   const iree_host_size_t element_size =
-      iree_hal_element_dense_byte_count(element_type);
+      iree_hal_element_dense_byte_count_unsafe(element_type);
   const uint8_t* expected_ptr = expected_elements.data;
   const uint8_t* actual_ptr = actual_elements.data;
   for (iree_host_size_t i = 0; i < element_count; ++i) {
@@ -183,7 +208,7 @@ bool iree_hal_compare_buffer_elements_broadcast(
       equality, expected_element.type, element_count,
       iree_make_const_byte_span(
           expected_element.storage,
-          iree_hal_element_dense_byte_count(expected_element.type)),
+          iree_hal_element_dense_byte_count_unsafe(expected_element.type)),
       /*expected_stride=*/0, actual_elements, /*actual_stride=*/1, out_index);
 }
 
@@ -211,6 +236,8 @@ iree_status_t iree_hal_buffer_view_metadata_matcher_initialize(
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "maximum shape rank exceeded");
   }
+  IREE_RETURN_IF_ERROR(
+      iree_tooling_check_comparison_support(element_type, encoding_type));
   out_matcher->shape_rank = shape_rank;
   memcpy(out_matcher->shape, shape, shape_rank * sizeof(*shape));
   out_matcher->element_type = element_type;
@@ -320,6 +347,8 @@ iree_status_t iree_hal_buffer_view_element_matcher_initialize(
     iree_hal_buffer_equality_t equality, iree_hal_buffer_element_t value,
     iree_hal_buffer_view_element_matcher_t* out_matcher) {
   memset(out_matcher, 0, sizeof(*out_matcher));
+  IREE_RETURN_IF_ERROR(iree_tooling_check_comparison_support(
+      value.type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR));
   out_matcher->equality = equality;
   out_matcher->value = value;
   return iree_ok_status();
@@ -431,6 +460,8 @@ iree_status_t iree_hal_buffer_view_array_matcher_initialize(
   IREE_ASSERT_ARGUMENT(!element_count ||
                        !iree_const_byte_span_is_empty(elements));
   memset(out_matcher, 0, sizeof(*out_matcher));
+  IREE_RETURN_IF_ERROR(iree_tooling_check_comparison_support(
+      element_type, IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR));
   out_matcher->equality = equality;
   out_matcher->element_type = element_type;
   out_matcher->element_count = element_count;
@@ -555,6 +586,9 @@ iree_status_t iree_hal_buffer_view_matcher_initialize(
     iree_hal_buffer_view_matcher_t* out_matcher) {
   IREE_ASSERT_ARGUMENT(expected);
   memset(out_matcher, 0, sizeof(*out_matcher));
+  IREE_RETURN_IF_ERROR(iree_tooling_check_comparison_support(
+      iree_hal_buffer_view_element_type(expected),
+      iree_hal_buffer_view_encoding_type(expected)));
   out_matcher->equality = equality;
   out_matcher->expected = expected;
   iree_hal_buffer_view_retain(expected);

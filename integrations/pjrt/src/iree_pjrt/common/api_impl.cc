@@ -4,13 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "iree_pjrt/common/api_impl.h"
-
 #include <optional>
 #include <sstream>
 #include <utility>
 
 #include "iree/hal/api.h"
+#include "iree_pjrt/common/api_impl.h"
 #include "iree_pjrt/common/iree_helpers.h"
 #include "iree_pjrt/common/tensor_utils.h"
 // TODO: Excise. Uses deep XLA internals.
@@ -776,7 +775,7 @@ iree_status_t DeviceInstance::HostBufferToDeviceSplat(
   IREE_RETURN_IF_ERROR(
       PJRTApiConverter::MapBufferTypeToElementType(type, &element_type));
   // TODO: Do something sensible with sub-byte aligned types.
-  if (IREE_UNLIKELY(iree_hal_element_bit_count(element_type) == 0) ||
+  if (IREE_UNLIKELY(iree_hal_element_numerical_type_is_opaque(element_type)) ||
       IREE_UNLIKELY(!iree_hal_element_is_byte_aligned(element_type))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -1059,7 +1058,7 @@ iree_status_t DeviceInstance::HostBufferToDevice(
   IREE_RETURN_IF_ERROR(
       PJRTApiConverter::MapBufferTypeToElementType(type, &element_type));
   // TODO: Do something sensible with sub-byte aligned types.
-  if (IREE_UNLIKELY(iree_hal_element_bit_count(element_type) == 0) ||
+  if (IREE_UNLIKELY(iree_hal_element_numerical_type_is_opaque(element_type)) ||
       IREE_UNLIKELY(!iree_hal_element_is_byte_aligned(element_type))) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
