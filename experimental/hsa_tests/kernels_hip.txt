@@ -1,0 +1,194 @@
+ELF Header:
+  Magic:   7f 45 4c 46 02 01 01 40 03 00 00 00 00 00 00 00
+  Class:                             ELF64
+  Data:                              2's complement, little endian
+  Version:                           1 (current)
+  OS/ABI:                            AMDGPU - HSA
+  ABI Version:                       3
+  Type:                              DYN (Shared object file)
+  Machine:                           EM_AMDGPU
+  Version:                           0x1
+  Entry point address:               0x0
+  Start of program headers:          64 (bytes into file)
+  Start of section headers:          3648 (bytes into file)
+  Flags:                             0x41, gfx1100
+  Size of this header:               64 (bytes)
+  Size of program headers:           56 (bytes)
+  Number of program headers:         9
+  Size of section headers:           64 (bytes)
+  Number of section headers:         15
+  Section header string table index: 13
+There are 15 section headers, starting at offset 0xe40:
+
+Section Headers:
+  [Nr] Name              Type            Address          Off    Size   ES Flg Lk Inf Al
+  [ 0]                   NULL            0000000000000000 000000 000000 00      0   0  0
+  [ 1] .note             NOTE            0000000000000238 000238 0004c0 00   A  0   0  4
+  [ 2] .dynsym           DYNSYM          00000000000006f8 0006f8 000090 18   A  5   1  8
+  [ 3] .gnu.hash         GNU_HASH        0000000000000788 000788 000030 00   A  2   0  8
+  [ 4] .hash             HASH            00000000000007b8 0007b8 000038 04   A  2   0  4
+  [ 5] .dynstr           STRTAB          00000000000007f0 0007f0 000049 00   A  0   0  1
+  [ 6] .rodata           PROGBITS        0000000000000840 000840 000040 00   A  0   0 64
+  [ 7] .text             PROGBITS        0000000000001900 000900 0002a4 00  AX  0   0 256
+  [ 8] .dynamic          DYNAMIC         0000000000002ba8 000ba8 000070 10  WA  5   0  8
+  [ 9] .relro_padding    NOBITS          0000000000002c18 000c18 0003e8 00  WA  0   0  1
+  [10] .bss              NOBITS          0000000000003c18 000c18 000001 00  WA  0   0  1
+  [11] .comment          PROGBITS        0000000000000000 000c18 0000b2 01  MS  0   0  1
+  [12] .symtab           SYMTAB          0000000000000000 000cd0 0000a8 18     14   2  8
+  [13] .shstrtab         STRTAB          0000000000000000 000d78 000075 00      0   0  1
+  [14] .strtab           STRTAB          0000000000000000 000ded 000052 00      0   0  1
+Key to Flags:
+  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),
+  L (link order), O (extra OS processing required), G (group), T (TLS),
+  C (compressed), x (unknown), o (OS specific), E (exclude),
+  R (retain), p (processor specific)
+
+Elf file type is DYN (Shared object file)
+Entry point 0x0
+There are 9 program headers, starting at offset 64
+
+Program Headers:
+  Type           Offset   VirtAddr           PhysAddr           FileSiz  MemSiz   Flg Align
+  PHDR           0x000040 0x0000000000000040 0x0000000000000040 0x0001f8 0x0001f8 R   0x8
+  LOAD           0x000000 0x0000000000000000 0x0000000000000000 0x000880 0x000880 R   0x1000
+  LOAD           0x000900 0x0000000000001900 0x0000000000001900 0x0002a4 0x0002a4 R E 0x1000
+  LOAD           0x000ba8 0x0000000000002ba8 0x0000000000002ba8 0x000070 0x000458 RW  0x1000
+  LOAD           0x000c18 0x0000000000003c18 0x0000000000003c18 0x000000 0x000001 RW  0x1000
+  DYNAMIC        0x000ba8 0x0000000000002ba8 0x0000000000002ba8 0x000070 0x000070 RW  0x8
+  GNU_RELRO      0x000ba8 0x0000000000002ba8 0x0000000000002ba8 0x000070 0x000458 R   0x1
+  GNU_STACK      0x000000 0x0000000000000000 0x0000000000000000 0x000000 0x000000 RW  0x0
+  NOTE           0x000238 0x0000000000000238 0x0000000000000238 0x0004c0 0x0004c0 R   0x4
+
+ Section to Segment mapping:
+  Segment Sections...
+   00     
+   01     .note .dynsym .gnu.hash .hash .dynstr .rodata 
+   02     .text 
+   03     .dynamic .relro_padding 
+   04     .bss 
+   05     .dynamic 
+   06     .dynamic .relro_padding 
+   07     
+   08     .note 
+   None   .comment .symtab .shstrtab .strtab 
+Dynamic section at offset 0xba8 contains 7 entries:
+  Tag                Type       Name/Value
+  0x0000000000000006 (SYMTAB)   0x6f8
+  0x000000000000000b (SYMENT)   24 (bytes)
+  0x0000000000000005 (STRTAB)   0x7f0
+  0x000000000000000a (STRSZ)    73 (bytes)
+  0x000000006ffffef5 (GNU_HASH) 0x788
+  0x0000000000000004 (HASH)     0x7b8
+  0x0000000000000000 (NULL)     0x0
+
+There are no relocations in this file.
+
+Symbol table '.dynsym' contains 6 entries:
+   Num:    Value          Size Type    Bind   Vis       Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT   UND 
+     1: 0000000000001a80    56 FUNC    WEAK   DEFAULT     7 __cxa_pure_virtual
+     2: 0000000000001ab8    56 FUNC    WEAK   DEFAULT     7 __cxa_deleted_virtual
+     3: 0000000000001b00   164 FUNC    GLOBAL PROTECTED   7 add_one
+     4: 0000000000003c18     1 OBJECT  GLOBAL DEFAULT    10 __hip_cuid_
+     5: 0000000000000840    64 OBJECT  GLOBAL PROTECTED   6 add_one.kd
+
+Symbol table '.symtab' contains 7 entries:
+   Num:    Value          Size Type    Bind   Vis       Ndx Name
+     0: 0000000000000000     0 NOTYPE  LOCAL  DEFAULT   UND 
+     1: 0000000000002ba8     0 NOTYPE  LOCAL  HIDDEN      8 _DYNAMIC
+     2: 0000000000001a80    56 FUNC    WEAK   DEFAULT     7 __cxa_pure_virtual
+     3: 0000000000001ab8    56 FUNC    WEAK   DEFAULT     7 __cxa_deleted_virtual
+     4: 0000000000001b00   164 FUNC    GLOBAL PROTECTED   7 add_one
+     5: 0000000000003c18     1 OBJECT  GLOBAL DEFAULT    10 __hip_cuid_
+     6: 0000000000000840    64 OBJECT  GLOBAL PROTECTED   6 add_one.kd
+There are no section groups in this file.
+Histogram for bucket list length (total of 6 buckets)
+ Length  Number     % of total  Coverage
+      0  1          ( 16.7%)       0.0%
+      1  5          ( 83.3%)     100.0%
+Histogram for `.gnu.hash' bucket list length (total of 1 buckets)
+ Length  Number     % of total  Coverage
+      0  0          (  0.0%)       0.0%
+      1  0          (  0.0%)       0.0%
+      2  0          (  0.0%)       0.0%
+      3  0          (  0.0%)       0.0%
+      4  0          (  0.0%)       0.0%
+      5  1          (100.0%)     100.0%
+Displaying notes found in: .note
+  Owner                Data size 	Description
+  AMDGPU               0x000004a9	NT_AMDGPU_METADATA (AMDGPU Metadata)
+    AMDGPU Metadata:
+        ---
+amdhsa.kernels:
+  - .args:
+      - .offset:         0
+        .size:           4
+        .value_kind:     by_value
+      - .address_space:  global
+        .offset:         8
+        .size:           8
+        .value_kind:     global_buffer
+      - .offset:         16
+        .size:           4
+        .value_kind:     hidden_block_count_x
+      - .offset:         20
+        .size:           4
+        .value_kind:     hidden_block_count_y
+      - .offset:         24
+        .size:           4
+        .value_kind:     hidden_block_count_z
+      - .offset:         28
+        .size:           2
+        .value_kind:     hidden_group_size_x
+      - .offset:         30
+        .size:           2
+        .value_kind:     hidden_group_size_y
+      - .offset:         32
+        .size:           2
+        .value_kind:     hidden_group_size_z
+      - .offset:         34
+        .size:           2
+        .value_kind:     hidden_remainder_x
+      - .offset:         36
+        .size:           2
+        .value_kind:     hidden_remainder_y
+      - .offset:         38
+        .size:           2
+        .value_kind:     hidden_remainder_z
+      - .offset:         56
+        .size:           8
+        .value_kind:     hidden_global_offset_x
+      - .offset:         64
+        .size:           8
+        .value_kind:     hidden_global_offset_y
+      - .offset:         72
+        .size:           8
+        .value_kind:     hidden_global_offset_z
+      - .offset:         80
+        .size:           2
+        .value_kind:     hidden_grid_dims
+    .group_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .kernarg_segment_size: 272
+    .language:       OpenCL C
+    .language_version:
+      - 2
+      - 0
+    .max_flat_workgroup_size: 1024
+    .name:           add_one
+    .private_segment_fixed_size: 0
+    .sgpr_count:     18
+    .sgpr_spill_count: 0
+    .symbol:         add_one.kd
+    .uniform_work_group_size: 1
+    .uses_dynamic_stack: false
+    .vgpr_count:     4
+    .vgpr_spill_count: 0
+    .wavefront_size: 32
+    .workgroup_processor_mode: 1
+amdhsa.target:   amdgcn-amd-amdhsa--gfx1100
+amdhsa.version:
+  - 1
+  - 2
+...
+

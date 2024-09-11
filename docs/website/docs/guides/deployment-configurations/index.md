@@ -96,7 +96,7 @@ focus and the build configuration.
 | `vulkan`     | Portable GPU execution using the Vulkan API |
 | `cuda`       | NVIDIA GPU execution using CUDA |
 | `metal`      | GPU execution on Apple platforms using Metal |
-| `rocm`       | **Experimental** <br> AMD GPU execution using ROCm |
+| `hsa`        | **Experimental** <br> AMD GPU execution using HSA |
 | `webgpu`     | **Experimental** <br> GPU execution on the web using WebGPU |
 
 Additional HAL drivers can also be defined external to the core project via

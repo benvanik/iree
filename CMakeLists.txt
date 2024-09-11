@@ -574,6 +574,24 @@ set(IREE_PACKAGE_ROOT_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(IREE_PACKAGE_ROOT_PREFIX "iree")
 
 #-------------------------------------------------------------------------------
+# Experimental HSA HAL driver
+# Enable with: -DIREE_EXTERNAL_HAL_DRIVERS=hsa
+#-------------------------------------------------------------------------------
+
+iree_register_external_hal_driver(
+  NAME
+    hsa
+  SOURCE_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/experimental/hsa"
+  BINARY_DIR
+    "${CMAKE_CURRENT_BINARY_DIR}/experimental/hsa"
+  DRIVER_TARGET
+    iree::experimental::hsa::registration
+  REGISTER_FN
+    iree_hal_hsa_driver_module_register
+)
+
+#-------------------------------------------------------------------------------
 # Experimental WebGPU HAL driver
 # Enable with: -DIREE_EXTERNAL_HAL_DRIVERS=webgpu
 #-------------------------------------------------------------------------------
@@ -908,6 +926,15 @@ if(IREE_HAL_DRIVER_VULKAN)
   add_subdirectory(third_party/vulkan_headers EXCLUDE_FROM_ALL)
   iree_install_targets(
     TARGETS Vulkan-Headers
+    COMPONENT IREEBundledLibraries
+    EXPORT_SET Runtime
+  )
+endif()
+
+if("hsa" IN_LIST IREE_EXTERNAL_HAL_DRIVERS)
+  add_subdirectory(build_tools/third_party/hsa-runtime-headers EXCLUDE_FROM_ALL)
+  iree_install_targets(
+    TARGETS hsa_runtime_headers
     COMPONENT IREEBundledLibraries
     EXPORT_SET Runtime
   )
