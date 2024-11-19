@@ -410,6 +410,9 @@ IREE_API_EXPORT iree_status_t iree_hal_amdgpu_topology_initialize_with_defaults(
   // Initialize an empty topology.
   iree_hal_amdgpu_topology_initialize(out_topology);
 
+  // DO NOT SUBMIT
+  agents.gpu_agent_count = 1;
+
   // Add all visible GPU agents.
   // The user can override this set and its order with `ROCR_VISIBLE_DEVICES`.
   iree_status_t status = iree_ok_status();
