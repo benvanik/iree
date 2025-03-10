@@ -243,6 +243,10 @@ void buildStreamAsyncPassPipeline(OpPassManager &passManager,
 
 void buildStreamCmdPassPipeline(OpPassManager &passManager,
                                 const TransformOptions &transformOptions) {
+  // Insert `stream.async.retain`/`stream.async.release` ops to explicitly
+  // define asynchronous resource lifetime.
+  passManager.addPass(IREE::Stream::createAutomaticReferenceCountingPass());
+
   // Schedule fine-grained allocations and insert placeholders for larger/longer
   // lifetime allocations.
   passManager.addPass(IREE::Stream::createScheduleAllocationPass());
@@ -267,6 +271,10 @@ void buildStreamCmdPassPipeline(OpPassManager &passManager,
   // cleanup patterns.
   passManager.addPass(IREE::Util::createPropagateSubrangesPass());
   buildStreamCleanupPassPipeline(passManager, transformOptions);
+
+  // Perform whole-program analysis to try to eliminate as many
+  // stream.async.retain/release ops as is safe.
+  passManager.addPass(IREE::Stream::createElideReferenceCountingPass());
 
   // Convert stream.async.retain/release ops into lower-level resource
   // primitives. Once we reify we lose the information required for analysis and
