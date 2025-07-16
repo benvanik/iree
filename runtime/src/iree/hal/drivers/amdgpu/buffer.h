@@ -80,7 +80,8 @@ iree_status_t iree_hal_amdgpu_resolve_buffer(
 // iree_hal_device_queue_alloca. Fails if the buffer is any other type.
 iree_status_t iree_hal_amdgpu_resolve_transient_buffer(
     iree_hal_buffer_t* buffer,
-    iree_hal_amdgpu_device_allocation_handle_t** out_handle);
+    IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_device_allocation_handle_t**
+        out_handle);
 
 #ifdef __cplusplus
 }  // extern "C"

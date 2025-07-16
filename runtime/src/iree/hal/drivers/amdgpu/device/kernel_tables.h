@@ -68,6 +68,10 @@ IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_cmd_dispatch_update,
                               IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_X,
                               IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_Y,
                               IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_Z)
+IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_cmd_host_call,
+                              IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_X,
+                              IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_Y,
+                              IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_Z)
 IREE_HAL_AMDGPU_DEVICE_KERNEL(iree_hal_amdgpu_device_cmd_branch,
                               IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_X,
                               IREE_HAL_AMDGPU_CMD_CONTROL_WORKGROUP_SIZE_Y,

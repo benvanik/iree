@@ -52,6 +52,20 @@ enum iree_hal_amdgpu_device_host_call_e {
   //   return_address: unused
   //   completion_signal: optional, signaled when the release has completed
   IREE_HAL_AMDGPU_DEVICE_HOST_CALL_POST_RELEASE,
+
+  // Host will call the provided user iree_hal_amdgpu_host_call_fn_t with the
+  // given user data. The function is allowed to execute asynchronously. If no
+  // completion signal is provided the call is treated like a post and execution
+  // of the caller will resume immediately after requesting the call be made.
+  //
+  // Signature:
+  //   arg0: uint64_t user_data[0]
+  //   arg1: uint64_t user_data[1]
+  //   arg2: uint64_t user_data[2]
+  //   arg3: uint64_t user_data[3]
+  //   return_address: void* fn_ptr
+  //   completion_signal: optional, signaled when the call has completed
+  IREE_HAL_AMDGPU_DEVICE_HOST_CALL_USER_FN,
 };
 
 // Represents the host runtime thread that is managing host interrupts.
@@ -109,6 +123,13 @@ void iree_hal_amdgpu_device_host_client_post_release(
     const iree_hal_amdgpu_device_host_client_t* IREE_AMDGPU_RESTRICT client,
     uint64_t resource0, uint64_t resource1, uint64_t resource2,
     uint64_t resource3, iree_hsa_signal_t completion_signal);
+
+// Calls a user-defined function (synchronously or asynchronously).
+//
+void iree_hal_amdgpu_device_host_client_call_user(
+    const iree_hal_amdgpu_device_host_client_t* IREE_AMDGPU_RESTRICT client,
+    uint64_t fn_ptr, uint64_t arg0, uint64_t arg1, uint64_t arg2, uint64_t arg3,
+    iree_hsa_signal_t completion_signal);
 
 #endif  // IREE_AMDGPU_TARGET_DEVICE
 

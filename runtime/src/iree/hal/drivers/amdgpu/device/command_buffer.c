@@ -603,9 +603,9 @@ iree_hal_amdgpu_device_cmd_dispatch_reserve(
   iree_hsa_kernel_dispatch_packet_t* packet =
       iree_hal_amdgpu_device_cmd_resolve_dispatch_packet(state, packet_id);
   packet->setup = dispatch_args->setup;
-  packet->workgroup_size[0] = dispatch_args->workgroup_size[0];
-  packet->workgroup_size[1] = dispatch_args->workgroup_size[1];
-  packet->workgroup_size[2] = dispatch_args->workgroup_size[2];
+  packet->workgroup_size[0] = cmd->config.workgroup_size[0];
+  packet->workgroup_size[1] = cmd->config.workgroup_size[1];
+  packet->workgroup_size[2] = cmd->config.workgroup_size[2];
   packet->reserved0 = 0;
   packet->private_segment_size = dispatch_args->private_segment_size;
   packet->group_segment_size =
@@ -661,9 +661,9 @@ iree_hal_amdgpu_device_cmd_dispatch_reserve(
     implicit_args->block_count[0] = workgroup_count_ptr[0];
     implicit_args->block_count[1] = workgroup_count_ptr[1];
     implicit_args->block_count[2] = workgroup_count_ptr[2];
-    implicit_args->group_size[0] = dispatch_args->workgroup_size[0];
-    implicit_args->group_size[1] = dispatch_args->workgroup_size[1];
-    implicit_args->group_size[2] = dispatch_args->workgroup_size[2];
+    implicit_args->group_size[0] = packet->workgroup_size[0];
+    implicit_args->group_size[1] = packet->workgroup_size[1];
+    implicit_args->group_size[2] = packet->workgroup_size[2];
     // Hardcoded to 0 in HIP.
     implicit_args->remainder[0] = 0;
     implicit_args->remainder[1] = 0;
@@ -769,6 +769,87 @@ static void iree_hal_amdgpu_device_cmd_dispatch_indirect_dynamic_issue(
   // executing while we're still running we want it to have valid data to
   // manipulate.
   uint8_t* IREE_AMDGPU_RESTRICT dispatch_kernarg_ptr =
+      state->execution_kernarg_storage + cmd->kernarg_offset +
+      IREE_HAL_AMDGPU_DEVICE_WORKGROUP_COUNT_UPDATE_KERNARG_SIZE;
+  iree_hsa_kernel_dispatch_packet_t* dispatch_packet =
+      iree_hal_amdgpu_device_cmd_dispatch_reserve(
+          state, block, cmd, dispatch_kernarg_ptr, dispatch_id);
+
+  // Update the dispatch packet with the required scheduling information.
+  // It is not yet committed and will not have its type set until the indirect
+  // update executes.
+  iree_hal_amdgpu_device_cmd_update_dispatch_packet(
+      state, &cmd->header, dispatch_packet,
+      IREE_HAL_AMDGPU_TRACE_EXECUTION_ZONE_TYPE_DISPATCH_INDIRECT,
+      cmd->config.kernel_args->trace_src_loc, execution_query_id);
+
+  // Workgroup count is dynamic and must be resolved just prior to executing
+  // the dispatch. There's no native AQL dispatch behavior to enable this so
+  // we have to emulate it by enqueuing a builtin that performs the
+  // indirection and overwrites the packet memory directly.
+  uint64_t* IREE_AMDGPU_RESTRICT update_kernarg_ptr =
+      (uint64_t*)(state->execution_kernarg_storage + cmd->kernarg_offset);
+  update_kernarg_ptr[0] = (uint64_t)cmd;
+  update_kernarg_ptr[1] =
+      (uint64_t)iree_hal_amdgpu_device_workgroup_count_buffer_ref_resolve(
+          cmd->config.workgroup_count.ref, state->bindings);
+  update_kernarg_ptr[2] = (uint64_t)dispatch_packet;
+
+  // Construct the update packet.
+  // Note that the header is not written until the end so that the
+  // hardware command processor stalls until we're done writing.
+  const iree_hal_amdgpu_device_kernel_args_t update_args =
+      state->kernels->iree_hal_amdgpu_device_cmd_dispatch_update;
+  iree_hsa_kernel_dispatch_packet_t* update_packet =
+      iree_hal_amdgpu_device_cmd_resolve_dispatch_packet(state, packet_id);
+  update_packet->setup = update_args.setup;
+  update_packet->workgroup_size[0] = update_args.workgroup_size[0];
+  update_packet->workgroup_size[1] = update_args.workgroup_size[1];
+  update_packet->workgroup_size[2] = update_args.workgroup_size[2];
+  update_packet->reserved0 = 0;
+  update_packet->grid_size[0] = 1;
+  update_packet->grid_size[1] = 1;
+  update_packet->grid_size[2] = 1;
+  update_packet->private_segment_size = update_args.private_segment_size;
+  update_packet->group_segment_size = update_args.group_segment_size;
+  update_packet->kernel_object = update_args.kernel_object;
+  update_packet->kernarg_address = update_kernarg_ptr;
+  update_packet->reserved2 = 0;
+
+  // Mark the update packet as ready to execute. The hardware command processor
+  // may begin executing it immediately after performing the atomic swap.
+  //
+  // NOTE: the following dispatch packet is still marked INVALID and is only
+  // changed after the update dispatch completes. The hardware command processor
+  // should process the update (as we change it from INVALID here) and then
+  // block before reading the contents of the dispatch packet.
+  return iree_hal_amdgpu_device_cmd_commit_dispatch_packet(
+      state, &cmd->header, update_packet,
+      IREE_HAL_AMDGPU_TRACE_EXECUTION_ZONE_TYPE_INTERNAL, 0,
+      IREE_HAL_AMDGPU_TRACE_EXECUTION_QUERY_ID_INVALID);
+}
+
+//===----------------------------------------------------------------------===//
+// IREE_HAL_AMDGPU_DEVICE_CMD_HOST_CALL
+//===----------------------------------------------------------------------===//
+
+IREE_AMDGPU_ATTRIBUTE_KERNEL IREE_AMDGPU_ATTRIBUTE_SINGLE_WORK_ITEM void
+iree_hal_amdgpu_device_cmd_host_call(
+    const iree_hal_amdgpu_device_cmd_host_call_t* IREE_AMDGPU_RESTRICT cmd) {
+  //
+}
+
+static void iree_hal_amdgpu_device_cmd_host_call_issue(
+    iree_hal_amdgpu_device_execution_state_t* IREE_AMDGPU_RESTRICT state,
+    const iree_hal_amdgpu_device_command_block_t* IREE_AMDGPU_RESTRICT block,
+    const iree_hal_amdgpu_device_cmd_host_call_t* IREE_AMDGPU_RESTRICT cmd,
+    const uint64_t packet_id,
+    const iree_hal_amdgpu_trace_execution_query_id_t execution_query_id) {
+  const uint32_t call_id = packet_id;
+  const uint32_t barrier_id = call_id + 1;  // optional
+
+  // Enqueue the call packet that posts the host service request.
+  uint8_t* IREE_AMDGPU_RESTRICT call_kernarg_ptr =
       state->execution_kernarg_storage + cmd->kernarg_offset +
       IREE_HAL_AMDGPU_DEVICE_WORKGROUP_COUNT_UPDATE_KERNARG_SIZE;
   iree_hsa_kernel_dispatch_packet_t* dispatch_packet =
@@ -1231,6 +1312,10 @@ static void iree_hal_amdgpu_device_cmd_issue(
     case IREE_HAL_AMDGPU_DEVICE_CMD_DISPATCH_INDIRECT_DYNAMIC:
       return iree_hal_amdgpu_device_cmd_dispatch_indirect_dynamic_issue(
           state, block, (const iree_hal_amdgpu_device_cmd_dispatch_t*)cmd,
+          packet_id, execution_query_id);
+    case IREE_HAL_AMDGPU_DEVICE_CMD_HOST_CALL:
+      return iree_hal_amdgpu_device_cmd_host_call_issue(
+          state, block, (const iree_hal_amdgpu_device_cmd_host_call_t*)cmd,
           packet_id, execution_query_id);
     case IREE_HAL_AMDGPU_DEVICE_CMD_BRANCH:
       return iree_hal_amdgpu_device_cmd_branch_issue(

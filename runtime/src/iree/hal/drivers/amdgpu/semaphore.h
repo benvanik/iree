@@ -9,14 +9,12 @@
 
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
+#include "iree/hal/drivers/amdgpu/device/semaphore.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif  // __cplusplus
-
-typedef struct iree_hal_amdgpu_device_semaphore_t
-    iree_hal_amdgpu_device_semaphore_t;
 
 typedef struct iree_hal_amdgpu_internal_semaphore_t
     iree_hal_amdgpu_internal_semaphore_t;
@@ -146,6 +144,20 @@ iree_status_t iree_hal_amdgpu_wait_semaphores(
     const iree_hal_amdgpu_libhsa_t* libhsa,
     iree_hal_amdgpu_semaphore_options_t options, iree_hal_wait_mode_t wait_mode,
     const iree_hal_semaphore_list_t semaphore_list, iree_timeout_t timeout);
+
+//===----------------------------------------------------------------------===//
+// Semaphore Resolution
+//===----------------------------------------------------------------------===//
+
+// Resolves a HAL semaphore to a device-side type and pointer/handle.
+// Returns success if the semaphore is of a type that can be used on any device
+// but does not verify the memory referenced is accessible to any particular
+// device. Some semaphore types are not directly addressable on device and may
+// need the host to manipulate them but can still be referenced for
+// round-tripping.
+iree_status_t iree_hal_amdgpu_resolve_semaphore(
+    iree_hal_semaphore_t* semaphore,
+    IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_device_semaphore_ref_t* out_ref);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -30,9 +30,9 @@ iree_host_size_t iree_hal_amdgpu_host_queue_calculate_size(
 iree_status_t iree_hal_amdgpu_host_queue_initialize(
     iree_hal_amdgpu_system_t* system, iree_hal_amdgpu_queue_options_t options,
     hsa_agent_t device_agent, iree_host_size_t device_ordinal,
-    iree_hal_amdgpu_host_service_t* host_service,
+    hsa_agent_t host_agent, iree_hal_amdgpu_host_service_t* host_service,
     iree_arena_block_pool_t* host_block_pool,
-    iree_hal_amdgpu_block_allocators_t* block_allocators,
+    iree_hal_amdgpu_block_allocators_t block_allocators,
     iree_hal_amdgpu_buffer_pool_t* buffer_pool,
     iree_hal_amdgpu_error_callback_t error_callback,
     hsa_signal_t initialization_signal, iree_allocator_t host_allocator,

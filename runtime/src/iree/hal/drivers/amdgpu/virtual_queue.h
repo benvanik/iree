@@ -10,7 +10,15 @@
 #include "iree/base/api.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/amdgpu/api.h"
+#include "iree/hal/drivers/amdgpu/util/block_pool.h"
 #include "iree/hal/drivers/amdgpu/util/libhsa.h"
+
+typedef struct iree_arena_block_pool_t iree_arena_block_pool_t;
+typedef struct iree_hal_amdgpu_buffer_pool_t iree_hal_amdgpu_buffer_pool_t;
+typedef uint8_t iree_hal_amdgpu_queue_entry_type_t;
+typedef struct iree_hal_amdgpu_queue_entry_header_t
+    iree_hal_amdgpu_queue_entry_header_t;
+typedef struct iree_hal_resource_set_t iree_hal_resource_set_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_queue_options_t
@@ -53,6 +61,7 @@ iree_status_t iree_hal_amdgpu_queue_infer_placement(
 typedef uint32_t iree_hal_amdgpu_queue_flags_t;
 enum iree_hal_amdgpu_queue_flag_bits_e {
   IREE_HAL_AMDGPU_QUEUE_FLAG_NONE = 0u,
+
   // Enable tracing of dispatches (when device tracing is enabled).
   IREE_HAL_AMDGPU_QUEUE_FLAG_TRACE_EXECUTION = 1u << 0,
 };
@@ -124,6 +133,19 @@ typedef struct iree_hal_amdgpu_virtual_queue_vtable_t
 // parent is deinitializing via the `deinitialize` vtable entry.
 typedef struct iree_hal_amdgpu_virtual_queue_t {
   const iree_hal_amdgpu_virtual_queue_vtable_t* vtable;
+
+  // Ordinal of the physical device the queue is associated with in the
+  // topology.
+  iree_host_size_t device_ordinal;
+
+  // Block pool used for host-only heap allocations (like queue entries).
+  iree_arena_block_pool_t* host_block_pool;
+
+  // Block allocators used for device-visible allocations.
+  iree_hal_amdgpu_block_allocators_t block_allocators;
+
+  // Pool of buffer handles used for reserving asynchronous allocations.
+  iree_hal_amdgpu_buffer_pool_t* buffer_pool;
 } iree_hal_amdgpu_virtual_queue_t;
 
 typedef struct iree_hal_amdgpu_virtual_queue_vtable_t {
@@ -132,75 +154,113 @@ typedef struct iree_hal_amdgpu_virtual_queue_vtable_t {
 
   void(IREE_API_PTR* trim)(iree_hal_amdgpu_virtual_queue_t* queue);
 
-  iree_status_t(IREE_API_PTR* alloca)(
-      iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_allocator_pool_t pool, iree_hal_buffer_params_t params,
-      iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
-      iree_hal_buffer_t** IREE_RESTRICT out_buffer);
+  // Commits the populated |entry| and schedules it on the queue according to
+  // the semaphores specified. The entry may begin executing immediately if all
+  // waits are satisfied or may be enqueued for future processing. The caller
+  // must not use |entry| after making the call as it may immediately complete
+  // and be freed prior to returning from this call.
+  void(IREE_API_PTR* commit_entry)(iree_hal_amdgpu_virtual_queue_t* queue,
+                                   iree_hal_amdgpu_queue_entry_header_t* entry);
 
-  iree_status_t(IREE_API_PTR* dealloca)(
+  // Requests that the given |entry| be retired from the queue as if it had
+  // completed execution in the queue context. This is used to avoid re-entrancy
+  // issues with non-HAL threads that may be calling into the HAL to complete
+  // asynchronous work.
+  void(IREE_API_PTR* request_retire)(
       iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* fill)(
-      iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, uint64_t pattern_bits,
-      iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* update)(
-      iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      const void* source_buffer, iree_host_size_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, iree_hal_update_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* copy)(
-      iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, iree_hal_copy_flags_t flags);
-
-  // NULL if not implemented and emulation should be used.
-  // TODO(benvanik): when all queue implementations support native I/O we should
-  // drop the emulation (it's bad).
-  iree_status_t(IREE_API_PTR* read)(
-      iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_file_t* source_file, uint64_t source_offset,
-      iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-      iree_device_size_t length, iree_hal_read_flags_t flags);
-
-  // NULL if not implemented and emulation should be used.
-  // TODO(benvanik): when all queue implementations support native I/O we should
-  // drop the emulation (it's bad).
-  iree_status_t(IREE_API_PTR* write)(
-      iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
-      iree_hal_file_t* target_file, uint64_t target_offset,
-      iree_device_size_t length, iree_hal_write_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* execute)(
-      iree_hal_amdgpu_virtual_queue_t* queue,
-      const iree_hal_semaphore_list_t wait_semaphore_list,
-      const iree_hal_semaphore_list_t signal_semaphore_list,
-      iree_hal_command_buffer_t* command_buffer,
-      iree_hal_buffer_binding_table_t binding_table,
-      iree_hal_execute_flags_t flags);
-
-  iree_status_t(IREE_API_PTR* flush)(iree_hal_amdgpu_virtual_queue_t* queue);
+      iree_hal_amdgpu_queue_entry_header_t* entry);
 } iree_hal_amdgpu_virtual_queue_vtable_t;
+
+// Retires |entry| inline on the calling thread.
+// This is intended to be called only by queue implementations that can ensure
+// it is called when the queue is in a state where retirement is possible.
+iree_status_t iree_hal_amdgpu_virtual_queue_retire_entry(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_queue_entry_header_t* entry);
+
+// Retires |entry| inline on the calling thread.
+// This is intended to be called only by queue implementations that can ensure
+// it is called when the queue is in a state where retirement is possible.
+// This variant of retire_entry supports providing cached information from the
+// entry that may be available without the need to reach into device memory.
+iree_status_t iree_hal_amdgpu_virtual_queue_retire_entry_explicit(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_queue_entry_header_t* entry,
+    bool has_signals, uint32_t allocation_pool,
+    iree_hal_amdgpu_block_token_t allocation_token,
+    iree_hal_resource_set_t* resource_set);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_alloca(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_allocator_pool_t pool, iree_hal_buffer_params_t params,
+    iree_device_size_t allocation_size, iree_hal_alloca_flags_t flags,
+    iree_hal_buffer_t** IREE_RESTRICT out_buffer);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_dealloca(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* buffer, iree_hal_dealloca_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_fill(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, uint64_t pattern_bits,
+    iree_host_size_t pattern_length, iree_hal_fill_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_update(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    const void* source_buffer, iree_host_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_update_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_copy(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_copy_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_read(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_file_t* source_file, uint64_t source_offset,
+    iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    iree_device_size_t length, iree_hal_read_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_write(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    iree_hal_queue_affinity_t queue_affinity,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
+    iree_hal_file_t* target_file, uint64_t target_offset,
+    iree_device_size_t length, iree_hal_write_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_barrier(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_execute_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_execute(
+    iree_hal_amdgpu_virtual_queue_t* queue,
+    const iree_hal_semaphore_list_t wait_semaphore_list,
+    const iree_hal_semaphore_list_t signal_semaphore_list,
+    iree_hal_command_buffer_t* command_buffer,
+    iree_hal_buffer_binding_table_t binding_table,
+    iree_hal_execute_flags_t flags);
+
+iree_status_t iree_hal_amdgpu_virtual_queue_flush(
+    iree_hal_amdgpu_virtual_queue_t* queue);
 
 #endif  // IREE_HAL_DRIVERS_AMDGPU_VIRTUAL_QUEUE_H_

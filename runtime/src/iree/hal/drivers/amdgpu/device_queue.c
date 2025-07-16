@@ -25,7 +25,7 @@ iree_status_t iree_hal_amdgpu_device_queue_initialize(
     hsa_agent_t device_agent, iree_host_size_t device_ordinal,
     iree_hal_amdgpu_host_service_t* host_service,
     iree_arena_block_pool_t* host_block_pool,
-    iree_hal_amdgpu_block_allocators_t* block_allocators,
+    iree_hal_amdgpu_block_allocators_t block_allocators,
     iree_hal_amdgpu_buffer_pool_t* buffer_pool,
     iree_hal_amdgpu_error_callback_t error_callback,
     hsa_signal_t initialization_signal, iree_allocator_t host_allocator,
@@ -34,7 +34,6 @@ iree_status_t iree_hal_amdgpu_device_queue_initialize(
   IREE_ASSERT_EQ(options.placement, IREE_HAL_AMDGPU_QUEUE_PLACEMENT_DEVICE);
   IREE_ASSERT_ARGUMENT(host_service);
   IREE_ASSERT_ARGUMENT(host_block_pool);
-  IREE_ASSERT_ARGUMENT(block_allocators);
   IREE_ASSERT_ARGUMENT(buffer_pool);
   IREE_ASSERT_ARGUMENT(out_queue);
   IREE_TRACE_ZONE_BEGIN(z0);

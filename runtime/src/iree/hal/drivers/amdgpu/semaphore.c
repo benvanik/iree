@@ -462,3 +462,28 @@ iree_status_t iree_hal_amdgpu_wait_semaphores(
   IREE_TRACE_ZONE_END(z0);
   return status;
 }
+
+//===----------------------------------------------------------------------===//
+// Semaphore Resolution
+//===----------------------------------------------------------------------===//
+
+iree_status_t iree_hal_amdgpu_resolve_semaphore(
+    iree_hal_semaphore_t* base_semaphore,
+    iree_hal_amdgpu_device_semaphore_ref_t* out_ref) {
+  out_ref->host_handle = base_semaphore;
+  // NOTE: when we have external semaphores we _may_ be able to access them
+  // toll-free such that we can still signal them on device. For example, an HSA
+  // signal that was imported could be specified without needing to wrap it in
+  // our own internal semaphore handle in order to get at the amd_signal_t.
+  if (iree_hal_amdgpu_internal_semaphore_isa(base_semaphore)) {
+    out_ref->type = IREE_HAL_AMDGPU_DEVICE_SEMAPHORE_TYPE_NATIVE_INTERNAL;
+    out_ref->value.native_handle =
+        ((iree_hal_amdgpu_internal_semaphore_t*)base_semaphore)
+            ->device_semaphore;
+    return iree_ok_status();
+  } else {
+    out_ref->type = IREE_HAL_AMDGPU_DEVICE_SEMAPHORE_TYPE_OPAQUE_HAL;
+    out_ref->value.bits = 0;
+    return iree_ok_status();
+  }
+}

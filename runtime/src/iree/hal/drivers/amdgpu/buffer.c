@@ -323,7 +323,8 @@ iree_status_t iree_hal_amdgpu_resolve_buffer(
 
 iree_status_t iree_hal_amdgpu_resolve_transient_buffer(
     iree_hal_buffer_t* base_buffer,
-    iree_hal_amdgpu_device_allocation_handle_t** out_handle) {
+    IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_device_allocation_handle_t**
+        out_handle) {
   if (!iree_hal_resource_is(base_buffer,
                             &iree_hal_amdgpu_transient_buffer_vtable)) {
     return iree_make_status(

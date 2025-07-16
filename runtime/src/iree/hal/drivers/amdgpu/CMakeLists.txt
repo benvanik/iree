@@ -95,6 +95,7 @@ iree_cc_library(
     "semaphore.h"
     "semaphore_pool.h"
     "system.h"
+    "virtual_queue.h"
   DEPS
     iree::base
     iree::base::internal

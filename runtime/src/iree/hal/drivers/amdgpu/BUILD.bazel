@@ -99,11 +99,11 @@ iree_runtime_cc_library(
         "host_service.h",
         "logical_device.h",
         "physical_device.h",
-        # "queue.h",
         "semaphore.h",
         "semaphore_pool.h",
         "system.h",
         # "trace_buffer.h",
+        "virtual_queue.h",
     ],
     deps = [
         "//runtime/src/iree/base",

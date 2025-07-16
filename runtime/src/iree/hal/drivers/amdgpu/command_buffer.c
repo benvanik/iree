@@ -1775,6 +1775,8 @@ static iree_status_t iree_hal_amdgpu_command_buffer_record_dispatch(
             executable, entry_point, device_ordinal, &device_kernel_args));
 
     cmd->config.flags = cmd_flags;
+    memcpy(cmd->config.workgroup_size, host_kernel_args->workgroup_size,
+           sizeof(cmd->config.workgroup_size));
     cmd->config.kernel_args = device_kernel_args;
     memcpy(&cmd->config.workgroup_count, &workgroup_count,
            sizeof(cmd->config.workgroup_count));

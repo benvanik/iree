@@ -32,7 +32,7 @@ iree_status_t iree_hal_amdgpu_device_queue_initialize(
     hsa_agent_t device_agent, iree_host_size_t device_ordinal,
     iree_hal_amdgpu_host_service_t* host_service,
     iree_arena_block_pool_t* host_block_pool,
-    iree_hal_amdgpu_block_allocators_t* block_allocators,
+    iree_hal_amdgpu_block_allocators_t block_allocators,
     iree_hal_amdgpu_buffer_pool_t* buffer_pool,
     iree_hal_amdgpu_error_callback_t error_callback,
     hsa_signal_t initialization_signal, iree_allocator_t host_allocator,

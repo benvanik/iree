@@ -260,6 +260,8 @@ enum iree_hal_amdgpu_device_cmd_type_e {
   IREE_HAL_AMDGPU_DEVICE_CMD_DISPATCH,
   // iree_hal_amdgpu_device_cmd_dispatch_t
   IREE_HAL_AMDGPU_DEVICE_CMD_DISPATCH_INDIRECT_DYNAMIC,
+  // iree_hal_amdgpu_device_cmd_host_call_t
+  IREE_HAL_AMDGPU_DEVICE_CMD_HOST_CALL,
   // iree_hal_amdgpu_device_cmd_branch_t
   IREE_HAL_AMDGPU_DEVICE_CMD_BRANCH,
   // iree_hal_amdgpu_device_cmd_cond_branch_t
@@ -539,17 +541,22 @@ typedef union iree_hal_amdgpu_device_workgroup_count_t {
 typedef struct iree_hal_amdgpu_device_cmd_dispatch_config_t {
   // Dispatch control flags.
   iree_hal_amdgpu_device_dispatch_flags_t flags;
-  uint16_t reserved0;
+  // XYZ dimensions of work-group, in work-items. Must be greater than 0.
+  // If the grid has fewer than 3 dimensions the unused must be 1.
+  // This overrides the field in kernel_args to allow for dynamic workgroup
+  // sizes.
+  uint16_t workgroup_size[3];
   // sharedMemBytes from the original dispatch. Added to the group_segment_size
   // during packet production.
   uint32_t dynamic_lds_size;
+  uint32_t reserved;
   // Kernel arguments used to dispatch the kernel.
   const iree_hal_amdgpu_device_kernel_args_t* kernel_args;
   // Direct or indirect workgroup count based on the flags.
   iree_hal_amdgpu_device_workgroup_count_t workgroup_count;
 } iree_hal_amdgpu_device_cmd_dispatch_config_t;
 static_assert(
-    sizeof(iree_hal_amdgpu_device_cmd_dispatch_config_t) == 32,
+    sizeof(iree_hal_amdgpu_device_cmd_dispatch_config_t) <= 48,
     "dispatch packet template is inlined into cmd structs and must be small");
 #define IREE_HAL_AMDGPU_DEVICE_WORKGROUP_COUNT_UPDATE_KERNARG_SIZE \
   (3 * sizeof(uint64_t))
@@ -599,6 +606,39 @@ typedef struct IREE_AMDGPU_ALIGNAS(64) iree_hal_amdgpu_device_cmd_dispatch_t {
            IREE_HAL_AMDGPU_DEVICE_DISPATCH_FLAG_INDIRECT_DYNAMIC) != 0)              \
              ? IREE_HAL_AMDGPU_DEVICE_CMD_DISPATCH_INDIRECT_DYNAMIC_AQL_PACKET_COUNT \
              : IREE_HAL_AMDGPU_DEVICE_CMD_DISPATCH_DIRECT_AQL_PACKET_COUNT)
+
+// Flags indicating how host calls are executed.
+typedef uint32_t iree_hal_amdgpu_host_call_flags_t;
+enum iree_hal_amdgpu_host_call_flag_bits_e {
+  IREE_HAL_AMDGPU_HOST_CALL_FLAG_NONE = 0u,
+  // The host call does not block execution of subsequent commands.
+  // It's possible for the call to not have executed by the time the command
+  // buffer execution completes and if any of the referenced user data is
+  // dependent on the queue execution lifetime it may be invalid by the time it
+  // does.
+  IREE_HAL_AMDGPU_HOST_CALL_FLAG_NON_BLOCKING = 1u << 0,
+};
+
+// Synchronously executes a host call.
+// The call will be executed according to the flags provided.
+//
+// Recorded by:
+//  iree_hal_command_buffer_host_call
+typedef struct IREE_AMDGPU_ALIGNAS(64) iree_hal_amdgpu_device_cmd_host_call_t {
+  iree_hal_amdgpu_device_cmd_header_t header;
+  // Block-relative kernel arguments address.
+  uint32_t kernarg_offset;
+  // Flags defining the call behavior.
+  iree_hal_amdgpu_host_call_flags_t flags;
+  // Host function pointer to call.
+  uint64_t fn_ptr;
+  // User data provided to the host function.
+  uint64_t user_data[4];
+  uint64_t reserved;
+} iree_hal_amdgpu_device_cmd_host_call_t;
+#define IREE_HAL_AMDGPU_DEVICE_CMD_HOST_CALL_AQL_PACKET_COUNT(flags) \
+  (1 + (((flags) & IREE_HAL_AMDGPU_HOST_CALL_FLAG_NON_BLOCKING) ? 0 : 1))
+#define IREE_HAL_AMDGPU_DEVICE_HOST_CALL_KERNARG_SIZE (2 * sizeof(uint64_t))
 
 // TODO(benvanik): better specify control flow; maybe conditional support.
 // The current implementation is a placeholder for more sophisticated control
@@ -685,43 +725,6 @@ typedef struct IREE_AMDGPU_ALIGNAS(64) iree_hal_amdgpu_device_cmd_return_t {
 #define IREE_HAL_AMDGPU_DEVICE_CMD_RETURN_KERNARG_SIZE (1 * sizeof(uint64_t))
 #define IREE_HAL_AMDGPU_DEVICE_CMD_RETURN_KERNARG_ALIGNMENT 8
 
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_debug_group_begin_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_debug_group_end_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_barrier_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_signal_event_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_reset_event_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_wait_events_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_fill_buffer_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_copy_buffer_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_dispatch_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_branch_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_cond_branch_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-static_assert(sizeof(iree_hal_amdgpu_device_cmd_return_t) <=
-                  IREE_HAL_AMDGPU_DEVICE_CMD_SIZE,
-              "commands must fit within the fixed command size");
-
 // A command describing an operation that may translate to zero or more AQL
 // packets.
 typedef struct IREE_AMDGPU_ALIGNAS(64) iree_hal_amdgpu_device_cmd_t {
@@ -736,6 +739,7 @@ typedef struct IREE_AMDGPU_ALIGNAS(64) iree_hal_amdgpu_device_cmd_t {
     iree_hal_amdgpu_device_cmd_fill_buffer_t fill_buffer;
     iree_hal_amdgpu_device_cmd_copy_buffer_t copy_buffer;
     iree_hal_amdgpu_device_cmd_dispatch_t dispatch;
+    iree_hal_amdgpu_device_cmd_host_call_t host_call;
     iree_hal_amdgpu_device_cmd_branch_t branch;
     iree_hal_amdgpu_device_cmd_cond_branch_t cond_branch;
     iree_hal_amdgpu_device_cmd_return_t ret /*urn*/;

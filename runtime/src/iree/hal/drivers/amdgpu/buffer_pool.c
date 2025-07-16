@@ -324,7 +324,8 @@ iree_status_t iree_hal_amdgpu_buffer_pool_preallocate(
 iree_status_t iree_hal_amdgpu_buffer_pool_acquire(
     iree_hal_amdgpu_buffer_pool_t* buffer_pool, iree_hal_buffer_params_t params,
     iree_device_size_t allocation_size, iree_hal_buffer_t** out_buffer,
-    iree_hal_amdgpu_device_allocation_handle_t** out_handle) {
+    IREE_AMDGPU_DEVICE_PTR iree_hal_amdgpu_device_allocation_handle_t**
+        out_handle) {
   IREE_ASSERT_ARGUMENT(buffer_pool);
   IREE_ASSERT_ARGUMENT(out_buffer);
   IREE_ASSERT_ARGUMENT(out_handle);

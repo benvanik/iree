@@ -26,6 +26,7 @@ string_list_flag(
 )
 
 UNCONDITIONAL_DRIVERS = [
+    "amdgpu",
     "local-sync",
     "local-task",
     "null",
@@ -41,14 +42,6 @@ UNCONDITIONAL_DRIVERS = [
     )
     for driver in UNCONDITIONAL_DRIVERS
 ]
-
-# AMDGPU is special and is conditioned on availability of ROCM.
-config_setting(
-    name = "amdgpu_enabled",
-    flag_values = {
-        ":enabled_drivers": "amdgpu",
-    },
-)
 
 # CUDA is special and is conditioned on availability of the CUDA toolkit.
 config_setting(

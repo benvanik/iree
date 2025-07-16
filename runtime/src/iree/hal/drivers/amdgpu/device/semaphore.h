@@ -13,6 +13,7 @@
 
 typedef struct iree_hal_amdgpu_device_semaphore_t
     iree_hal_amdgpu_device_semaphore_t;
+typedef struct iree_hal_semaphore_t iree_hal_semaphore_t;
 
 //===----------------------------------------------------------------------===//
 // iree_hal_amdgpu_device_semaphore_t
@@ -69,6 +70,49 @@ typedef struct iree_hal_amdgpu_device_semaphore_t {
   // device queue modes.
 } iree_hal_amdgpu_device_semaphore_t;
 
+//===----------------------------------------------------------------------===//
+// iree_hal_amdgpu_device_semaphore_ref_t
+//===----------------------------------------------------------------------===//
+
+typedef uint8_t iree_hal_amdgpu_device_semaphore_type_t;
+enum iree_hal_amdgpu_device_semaphore_type_e {
+  // A generic host `iree_hal_semaphore_t*` that cannot be accessed on device.
+  // Only the host semaphore handle is valid on the reference.
+  IREE_HAL_AMDGPU_DEVICE_SEMAPHORE_TYPE_OPAQUE_HAL = 0u,
+  // A device-visible AMDGPU HAL semaphore that can be manipulated directly as
+  // `iree_hal_amdgpu_device_semaphore_t*`.
+  IREE_HAL_AMDGPU_DEVICE_SEMAPHORE_TYPE_NATIVE_INTERNAL,
+};
+
+// A reference to a semaphore.
+// The target semaphore handle may not be device-visible and may only be usable
+// as part of a host->device->host flow.
+typedef struct iree_hal_amdgpu_device_semaphore_ref_t {
+  // Type of the reference denoting which value is valid.
+  uint64_t type : 8;
+  // TODO(benvanik): embed additional type-specific information here that could
+  // be used to avoid indirection in common cases. Not sure what that would be
+  // yet, but if we started homing handles on particular devices this could be
+  // used to detect local vs. remote semaphores. 56 bits is enough for a
+  // sign-extended pointer and we could put the amd_signal_t* in here. We could
+  // also fold in the host_handle if we can't find any other uses.
+  uint64_t reserved : 56;
+  // Host semaphore handle in non-device-accessible memory.
+  // This may be a semaphore from an entirely different HAL device
+  // implementation.
+  iree_hal_semaphore_t* host_handle;
+  union {
+    // IREE_HAL_AMDGPU_DEVICE_SEMAPHORE_TYPE_NATIVE.
+    iree_hal_amdgpu_device_semaphore_t* native_handle;
+    // Used for setting the value regardless of type.
+    uint64_t bits;
+  } value;
+} iree_hal_amdgpu_device_semaphore_ref_t;
+
+//===----------------------------------------------------------------------===//
+// iree_hal_amdgpu_device_semaphore_list_t
+//===----------------------------------------------------------------------===//
+
 // A list of semaphores and the payload the semaphore is expected to reach or
 // be signaled to depending on the operation.
 typedef struct iree_hal_amdgpu_device_semaphore_list_t {
@@ -76,7 +120,7 @@ typedef struct iree_hal_amdgpu_device_semaphore_list_t {
   uint16_t reserved0;
   uint32_t reserved1;  // could store wait state tracking
   struct {
-    iree_hal_amdgpu_device_semaphore_t* semaphore;
+    iree_hal_amdgpu_device_semaphore_ref_t ref;
     uint64_t payload;
   } entries[];
 } iree_hal_amdgpu_device_semaphore_list_t;

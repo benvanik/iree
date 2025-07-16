@@ -20,7 +20,6 @@
 #include "iree/hal/drivers/amdgpu/util/topology.h"
 #include "iree/hal/drivers/amdgpu/virtual_queue.h"
 #include "iree/hal/utils/file_registry.h"
-#include "iree/hal/utils/file_transfer.h"
 
 //===----------------------------------------------------------------------===//
 // Utilities
@@ -837,9 +836,9 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_alloca(
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->alloca(queue, wait_semaphore_list,
-                               signal_semaphore_list, pool, params,
-                               allocation_size, flags, out_buffer);
+  return iree_hal_amdgpu_virtual_queue_alloca(
+      queue, wait_semaphore_list, signal_semaphore_list, pool, params,
+      allocation_size, flags, out_buffer);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_dealloca(
@@ -852,8 +851,8 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_dealloca(
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->dealloca(queue, wait_semaphore_list,
-                                 signal_semaphore_list, buffer, flags);
+  return iree_hal_amdgpu_virtual_queue_dealloca(
+      queue, wait_semaphore_list, signal_semaphore_list, buffer, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_fill(
@@ -882,9 +881,9 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_fill(
           "pattern length must be 1, 2, 4, or 8 - got %" PRIhsz,
           pattern_length);
   }
-  return queue->vtable->fill(queue, wait_semaphore_list, signal_semaphore_list,
-                             target_buffer, target_offset, length, pattern_bits,
-                             pattern_length, flags);
+  return iree_hal_amdgpu_virtual_queue_fill(
+      queue, wait_semaphore_list, signal_semaphore_list, target_buffer,
+      target_offset, length, pattern_bits, pattern_length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_update(
@@ -899,7 +898,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_update(
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->update(
+  return iree_hal_amdgpu_virtual_queue_update(
       queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
       source_offset, target_buffer, target_offset, length, flags);
 }
@@ -916,9 +915,9 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_copy(
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->copy(queue, wait_semaphore_list, signal_semaphore_list,
-                             source_buffer, source_offset, target_buffer,
-                             target_offset, length, flags);
+  return iree_hal_amdgpu_virtual_queue_copy(
+      queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
+      source_offset, target_buffer, target_offset, length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_read(
@@ -930,37 +929,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_read(
     iree_device_size_t length, iree_hal_read_flags_t flags) {
   iree_hal_amdgpu_logical_device_t* logical_device =
       iree_hal_amdgpu_logical_device_cast(base_device);
-
-  // Route to optimized queue I/O if available.
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  if (queue->vtable->read) {
-    return queue->vtable->read(
-        queue, wait_semaphore_list, signal_semaphore_list, source_file,
-        source_offset, target_buffer, target_offset, length, flags);
-  }
-
-  // Fall back to inefficient emulated I/O.
-  // TODO(benvanik): when all queue implementations support native I/O we should
-  // drop the emulation (it's bad).
-  iree_hal_queue_affinity_and_into(queue_affinity,
-                                   logical_device->queue_affinity_mask);
-  if (iree_hal_queue_affinity_is_empty(queue_affinity)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "no valid queue affinity bits specified");
-  }
-  iree_status_t loop_status = iree_ok_status();
-  iree_hal_file_transfer_options_t options = {
-      .loop = iree_loop_inline(&loop_status),
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_read_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_file, source_offset, target_buffer, target_offset, length, flags,
-      options));
-  return loop_status;
+  return iree_hal_amdgpu_virtual_queue_read(
+      queue, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      source_file, source_offset, target_buffer, target_offset, length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_write(
@@ -972,37 +946,12 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_write(
     iree_device_size_t length, iree_hal_write_flags_t flags) {
   iree_hal_amdgpu_logical_device_t* logical_device =
       iree_hal_amdgpu_logical_device_cast(base_device);
-
-  // Route to optimized queue I/O if available.
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  if (queue->vtable->read) {
-    return queue->vtable->write(
-        queue, wait_semaphore_list, signal_semaphore_list, source_buffer,
-        source_offset, target_file, target_offset, length, flags);
-  }
-
-  // Fall back to inefficient emulated I/O.
-  // TODO(benvanik): when all queue implementations support native I/O we should
-  // drop the emulation (it's bad).
-  iree_hal_queue_affinity_and_into(queue_affinity,
-                                   logical_device->queue_affinity_mask);
-  if (iree_hal_queue_affinity_is_empty(queue_affinity)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "no valid queue affinity bits specified");
-  }
-  iree_status_t loop_status = iree_ok_status();
-  iree_hal_file_transfer_options_t options = {
-      .loop = iree_loop_inline(&loop_status),
-      .chunk_count = IREE_HAL_FILE_TRANSFER_CHUNK_COUNT_DEFAULT,
-      .chunk_size = IREE_HAL_FILE_TRANSFER_CHUNK_SIZE_DEFAULT,
-  };
-  IREE_RETURN_IF_ERROR(iree_hal_device_queue_write_streaming(
-      base_device, queue_affinity, wait_semaphore_list, signal_semaphore_list,
-      source_buffer, source_offset, target_file, target_offset, length, flags,
-      options));
-  return loop_status;
+  return iree_hal_amdgpu_virtual_queue_write(
+      queue, queue_affinity, wait_semaphore_list, signal_semaphore_list,
+      source_buffer, source_offset, target_file, target_offset, length, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_execute(
@@ -1017,9 +966,14 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_execute(
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->execute(queue, wait_semaphore_list,
-                                signal_semaphore_list, command_buffer,
-                                binding_table, flags);
+  if (command_buffer == NULL) {
+    // Fast-path barriers.
+    return iree_hal_amdgpu_virtual_queue_barrier(queue, wait_semaphore_list,
+                                                 signal_semaphore_list, flags);
+  }
+  return iree_hal_amdgpu_virtual_queue_execute(
+      queue, wait_semaphore_list, signal_semaphore_list, command_buffer,
+      binding_table, flags);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_queue_flush(
@@ -1029,7 +983,7 @@ static iree_status_t iree_hal_amdgpu_logical_device_queue_flush(
   iree_hal_amdgpu_virtual_queue_t* queue = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amdgpu_logical_device_select_queue(
       logical_device, queue_affinity, &queue));
-  return queue->vtable->flush(queue);
+  return iree_hal_amdgpu_virtual_queue_flush(queue);
 }
 
 static iree_status_t iree_hal_amdgpu_logical_device_wait_semaphores(
