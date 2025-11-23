@@ -15,6 +15,7 @@ iree_cc_library(
     IR
   HDRS
     "ClosureOpUtils.h"
+    "UtilConstraints.h"
     "UtilDialect.h"
     "UtilOps.h"
     "UtilTraits.h"
@@ -24,8 +25,10 @@ iree_cc_library(
     "UtilAttrInterfaces.h.inc"
     "UtilAttrs.cpp.inc"
     "UtilAttrs.h.inc"
+    "UtilConstraints.h.inc"
     "UtilEnums.cpp.inc"
     "UtilEnums.h.inc"
+    "UtilErrors.h"
     "UtilOpInterfaces.cpp.inc"
     "UtilOpInterfaces.h.inc"
     "UtilOps.cpp.inc"
@@ -38,11 +41,14 @@ iree_cc_library(
     "ClosureOpUtils.cpp"
     "UtilAttrs.cpp"
     "UtilDialect.cpp"
+    "UtilErrors.cpp"
     "UtilOpFolders.cpp"
     "UtilOps.cpp"
     "UtilTypes.cpp"
   DEPS
     ::UtilAttrsGen
+    ::UtilConstraintsGen
+    ::UtilErrorsGen
     ::UtilInterfacesGen
     ::UtilOpsGen
     ::UtilTypesGen
@@ -66,6 +72,7 @@ iree_cc_library(
     MLIRTransforms
     MLIRUBDialect
     MLIRViewLikeInterface
+    iree::compiler::Utils
   PUBLIC
 )
 
@@ -113,6 +120,28 @@ iree_tablegen_library(
   OUTS
     --gen-typedef-decls UtilTypes.h.inc
     --gen-typedef-defs UtilTypes.cpp.inc
+)
+
+iree_tablegen_library(
+  NAME
+    UtilConstraintsGen
+  TD_FILE
+    "UtilConstraints.td"
+  OUTS
+    --dialect=Util --gen-iree-constraint-traits UtilConstraints.h.inc
+  TBLGEN
+    IREE
+)
+
+iree_tablegen_library(
+  NAME
+    UtilErrorsGen
+  TD_FILE
+    "UtilErrors.td"
+  OUTS
+    --gen-iree-error-structs UtilErrors.h
+  TBLGEN
+    IREE
 )
 
 iree_tablegen_doc(

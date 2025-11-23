@@ -2534,3 +2534,8 @@ Operation *SCFUnreachableOp::createWithTerminator(OpBuilder &builder,
 
 #define GET_OP_CLASSES
 #include "iree/compiler/Dialect/Util/IR/UtilOps.cpp.inc"
+
+// Include constraint trait definitions.
+// Note: Even though Util operations don't currently use constraints,
+// we include this for consistency with the architecture pattern.
+#include "iree/compiler/Dialect/Util/IR/UtilConstraints.h"

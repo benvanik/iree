@@ -15,6 +15,7 @@ iree_cc_library(
     Utils
   HDRS
     "ConversionUtils.h"
+    "Diagnostics.h"
     "EmbeddedDataDirectory.h"
     "EquivalenceUtils.h"
     "FlatbufferUtils.h"

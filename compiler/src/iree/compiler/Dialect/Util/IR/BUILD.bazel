@@ -21,6 +21,9 @@ iree_td_library(
         [
             "UtilAttrs.td",
             "UtilBase.td",
+            "UtilConstraints.td",
+            "UtilErrorBase.td",
+            "UtilErrors.td",
             "UtilInterfaces.td",
             "UtilOps.td",
             "UtilTypes.td",
@@ -47,12 +50,14 @@ iree_compiler_cc_library(
         "ClosureOpUtils.cpp",
         "UtilAttrs.cpp",
         "UtilDialect.cpp",
+        "UtilErrors.cpp",
         "UtilOpFolders.cpp",
         "UtilOps.cpp",
         "UtilTypes.cpp",
     ],
     hdrs = [
         "ClosureOpUtils.h",
+        "UtilConstraints.h",
         "UtilDialect.h",
         "UtilOps.h",
         "UtilTraits.h",
@@ -63,8 +68,10 @@ iree_compiler_cc_library(
         "UtilAttrs.h.inc",
         "UtilAttrInterfaces.cpp.inc",
         "UtilAttrInterfaces.h.inc",
+        "UtilConstraints.h.inc",
         "UtilEnums.cpp.inc",
         "UtilEnums.h.inc",
+        "UtilErrors.h",
         "UtilOpInterfaces.cpp.inc",
         "UtilOpInterfaces.h.inc",
         "UtilOps.cpp.inc",
@@ -76,9 +83,12 @@ iree_compiler_cc_library(
     ],
     deps = [
         ":UtilAttrsGen",
+        ":UtilConstraintsGen",
+        ":UtilErrorsGen",
         ":UtilInterfacesGen",
         ":UtilOpsGen",
         ":UtilTypesGen",
+        "//compiler/src/iree/compiler/Utils",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:AffineDialect",
         "@llvm-project//mlir:ArithDialect",
@@ -198,6 +208,35 @@ iree_gentbl_cc_library(
     ],
     tblgen = "@llvm-project//mlir:mlir-tblgen",
     td_file = "UtilTypes.td",
+    deps = [":td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "UtilConstraintsGen",
+    tbl_outs = [
+        (
+            [
+                "--dialect=Util",
+                "--gen-iree-constraint-traits",
+            ],
+            "UtilConstraints.h.inc",
+        ),
+    ],
+    tblgen = "//tools:iree-tblgen",
+    td_file = "UtilConstraints.td",
+    deps = [":td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "UtilErrorsGen",
+    tbl_outs = [
+        (
+            ["--gen-iree-error-structs"],
+            "UtilErrors.h",
+        ),
+    ],
+    tblgen = "//tools:iree-tblgen",
+    td_file = "UtilErrors.td",
     deps = [":td_files"],
 )
 

@@ -48,6 +48,7 @@ iree_compiler_cc_library(
     ],
     hdrs = [
         "ConversionUtils.h",
+        "Diagnostics.h",
         "EmbeddedDataDirectory.h",
         "EquivalenceUtils.h",
         "FlatbufferUtils.h",

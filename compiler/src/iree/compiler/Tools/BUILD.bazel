@@ -47,6 +47,8 @@ iree_compiler_cc_library(
         "//compiler/src/iree/compiler/Dialect/HAL/Transforms",
         "//compiler/src/iree/compiler/Dialect/LinalgExt/IR",
         "//compiler/src/iree/compiler/Dialect/LinalgExt/Transforms",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR:LoomDialect",
+        "//compiler/src/iree/compiler/Dialect/Loom/Transforms",
         "//compiler/src/iree/compiler/Dialect/Stream/IR",
         "//compiler/src/iree/compiler/Dialect/Stream/Transforms",
         "//compiler/src/iree/compiler/Dialect/Util/IR",

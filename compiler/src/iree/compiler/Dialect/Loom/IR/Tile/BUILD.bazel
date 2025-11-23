@@ -1,0 +1,124 @@
+# Copyright 2025 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//build_tools/bazel:build_defs.oss.bzl",
+    "iree_compiler_cc_library",
+    "iree_gentbl_cc_library",
+    "iree_td_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# TableGen libraries
+#===------------------------------------------------------------------------===#
+
+iree_td_library(
+    name = "td_files",
+    srcs = [
+        "AllocaOp.td",
+        "BroadcastOp.td",
+        "ConstantOp.td",
+        "DimOp.td",
+        "ElementwiseOp.td",
+        "FillOp.td",
+        "SliceOp.td",
+        "TileOps.td",
+        "UpdateOp.td",
+        "YieldOp.td",
+    ],
+    deps = [
+        "//compiler/src/iree/compiler/Dialect/Loom/IR:td_files",
+    ],
+)
+
+#===------------------------------------------------------------------------===#
+# Code generation
+#===------------------------------------------------------------------------===#
+
+iree_gentbl_cc_library(
+    name = "TileOpsGen",
+    tbl_outs = [
+        (
+            ["--gen-op-decls"],
+            "TileOps.h.inc",
+        ),
+        (
+            ["--gen-op-defs"],
+            "TileOps.cpp.inc",
+        ),
+        (
+            ["--gen-enum-decls"],
+            "TileEnums.h.inc",
+        ),
+        (
+            ["--gen-enum-defs"],
+            "TileEnums.cpp.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "TileOps.td",
+    deps = [":td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "TileOpErrorsGen",
+    tbl_outs = [
+        (
+            ["--gen-iree-op-error-tag-dispatch"],
+            "TileOpErrors.cpp.inc",
+        ),
+    ],
+    tblgen = "//tools:iree-tblgen",
+    td_file = "TileOps.td",
+    deps = [":td_files"],
+)
+
+#===------------------------------------------------------------------------===#
+# C++ library
+#===------------------------------------------------------------------------===#
+
+iree_compiler_cc_library(
+    name = "Tile",
+    srcs = [
+        "BroadcastOp.cpp",
+        "ConstantOp.cpp",
+        "DimOp.cpp",
+        "ElementwiseOp.cpp",
+        "FillOp.cpp",
+        "SliceOp.cpp",
+        "TileOps.cpp",
+        "UpdateOp.cpp",
+    ],
+    hdrs = [
+        "TileOps.h",
+    ],
+    textual_hdrs = [
+        "TileEnums.cpp.inc",
+        "TileEnums.h.inc",
+        "TileOpErrors.cpp.inc",
+        "TileOps.cpp.inc",
+        "TileOps.h.inc",
+    ],
+    deps = [
+        ":TileOpErrorsGen",
+        ":TileOpsGen",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR",
+        "//compiler/src/iree/compiler/Dialect/Util/IR",
+        "//compiler/src/iree/compiler/Utils",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:InferTypeOpInterface",
+        "@llvm-project//mlir:SideEffectInterfaces",
+        "@llvm-project//mlir:Support",
+    ],
+)

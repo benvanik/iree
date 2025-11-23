@@ -7,6 +7,7 @@
 #ifndef IREE_DIALECT_UTIL_IR_UTIL_BASE
 #define IREE_DIALECT_UTIL_IR_UTIL_BASE
 
+include "iree/compiler/Dialect/Util/IR/UtilErrorBase.td"
 include "iree/compiler/Utils/DocMetadata.td"
 include "mlir/IR/EnumAttr.td"
 include "mlir/IR/OpBase.td"
@@ -130,6 +131,10 @@ class Util_Op<string mnemonic, list<Trait> traits = []>
 
   // Optional documentation metadata for rich doc generation.
   Util_OpDocMetadata docMetadata = ?;
+
+  // Errors that this op can emit from its verifier.
+  // Used for documentation and future code generation.
+  list<Util_ErrorBase> errors = [];
 }
 
 class Util_PureOp<string mnemonic, list<Trait> traits = []> :
@@ -152,6 +157,9 @@ class Util_OpInterface<string name, list<Interface> baseInterfaces = []> :
   let cppNamespace = "::mlir::iree_compiler::IREE::Util";
   // Optional documentation metadata for rich doc generation.
   Util_InterfaceDocMetadata docMetadata = ?;
+
+  // Errors that interface verifiers can emit.
+  list<Util_ErrorBase> errors = [];
 }
 
 class Util_TypeInterface<string name, list<Interface> baseInterfaces = []> :

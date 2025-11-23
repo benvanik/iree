@@ -1,0 +1,78 @@
+# Copyright 2025 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//build_tools/bazel:build_defs.oss.bzl",
+    "iree_compiler_cc_library",
+    "iree_gentbl_cc_library",
+    "iree_td_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# TableGen libraries
+#===------------------------------------------------------------------------===#
+
+iree_td_library(
+    name = "td_files",
+    srcs = [
+        "TestOps.td",
+    ],
+    deps = [
+        "//compiler/src/iree/compiler/Dialect/Loom/IR:td_files",
+    ],
+)
+
+#===------------------------------------------------------------------------===#
+# Code generation
+#===------------------------------------------------------------------------===#
+
+iree_gentbl_cc_library(
+    name = "TestOpsGen",
+    tbl_outs = [
+        (
+            ["--gen-op-decls"],
+            "TestOps.h.inc",
+        ),
+        (
+            ["--gen-op-defs"],
+            "TestOps.cpp.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "TestOps.td",
+    deps = [":td_files"],
+)
+
+#===------------------------------------------------------------------------===#
+# C++ library
+#===------------------------------------------------------------------------===#
+
+iree_compiler_cc_library(
+    name = "Test",
+    srcs = [
+        "TestOps.cpp",
+    ],
+    hdrs = [
+        "TestOps.h",
+    ],
+    textual_hdrs = [
+        "TestOps.cpp.inc",
+        "TestOps.h.inc",
+    ],
+    deps = [
+        ":TestOpsGen",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR",
+        "@llvm-project//mlir:ArithDialect",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:SideEffectInterfaces",
+    ],
+)

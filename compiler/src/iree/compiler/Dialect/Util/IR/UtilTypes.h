@@ -259,6 +259,12 @@ using SetIntDivisibilityFn =
 // Shape-aware interface utilities
 //===----------------------------------------------------------------------===//
 
+namespace detail {
+
+LogicalResult verifyShapeAwareOp(ShapeAwareOpInterface shapeOp);
+
+} // namespace detail
+
 // Walks the SSA use-def chain upwards to find the dynamic dimensions of the
 // value. Returns None if the shape cannot be found.
 std::optional<ValueRange> findDynamicDims(Value shapedValue);

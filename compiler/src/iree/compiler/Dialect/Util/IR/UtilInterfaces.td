@@ -16,7 +16,6 @@ include "mlir/IR/SymbolInterfaces.td"
 //===----------------------------------------------------------------------===//
 
 def Util_ClosureOpInterface : Util_OpInterface<"ClosureOpInterface"> {
-
   let description = [{
     Interface for ops that follow the util dialect closure semantics (explicit
     captures, dynamic-shape awareness, and normal operand/result SSA behavior).
@@ -114,7 +113,6 @@ def Util_ClosureOpInterface : Util_OpInterface<"ClosureOpInterface"> {
 }
 
 def Util_ClosureYieldOpInterface : Util_OpInterface<"ClosureYieldOpInterface"> {
-
   let description = [{
     Interface for ops that yield results from a closure. These also generally
     implement RegionBranchTerminatorOpInterface and that should be used when
@@ -143,7 +141,6 @@ def Util_ClosureYieldOpInterface : Util_OpInterface<"ClosureYieldOpInterface"> {
 
 def InferIntDivisibilityOpInterface :
     Util_OpInterface<"InferIntDivisibilityOpInterface"> {
-
   let description = [{
     Allows operations to participate in integer divisibility analysis.
   }];
@@ -167,7 +164,6 @@ def InferIntDivisibilityOpInterface :
 //===----------------------------------------------------------------------===//
 
 def Util_InitializerOpInterface : Util_OpInterface<"InitializerOpInterface"> {
-
   let description = [{
     Interface for ops that behave as module-wide initializers.
     Initializers run in the order they are defined in the module as if they were
@@ -197,7 +193,6 @@ def Util_InitializerOpInterface : Util_OpInterface<"InitializerOpInterface"> {
 //===----------------------------------------------------------------------===//
 
 def Util_GlobalOpInterface : Util_OpInterface<"GlobalOpInterface"> {
-
   let description = [{
     Interface for ops that define global values.
     Globals themselves have value-type semantics but the values stored may not,
@@ -652,7 +647,6 @@ def Util_GlobalStoreIndirectOpInterface : Util_GlobalIndirectAccessorOpInterface
 //===----------------------------------------------------------------------===//
 
 def Util_NumericCastOpInterface : Util_OpInterface<"NumericCastOpInterface"> {
-
   let description = [{
     Applied to numeric casting ops which can convert between different numeric
     types or shaped-types thereof. Example ops include `fptosi`, `trunci`, etc.
@@ -746,7 +740,6 @@ def Util_NumericCastOpInterface : Util_OpInterface<"NumericCastOpInterface"> {
 //===----------------------------------------------------------------------===//
 
 def Util_TiedOpInterface : Util_OpInterface<"TiedOpInterface"> {
-
   let description = [{
     An operation that "ties" one or more results to its operands indicating
     that the result is directly related to the operand in an operation-defined
@@ -982,7 +975,6 @@ def Util_TiedOpInterface : Util_OpInterface<"TiedOpInterface"> {
 //===----------------------------------------------------------------------===//
 
 def Util_ShapeAwareOp : Util_OpInterface<"ShapeAwareOpInterface"> {
-
   let description = [{
     An operation that is able to provide dynamic shape dimensions for all
     shaped operands and results.
@@ -1056,6 +1048,11 @@ def Util_ShapeAwareOp : Util_OpInterface<"ShapeAwareOpInterface"> {
       }]
     >,
   ];
+
+  let verify = [{
+    return IREE::Util::detail::verifyShapeAwareOp(
+        cast<ShapeAwareOpInterface>($_op));
+  }];
 }
 
 //===----------------------------------------------------------------------===//
@@ -1063,7 +1060,6 @@ def Util_ShapeAwareOp : Util_OpInterface<"ShapeAwareOpInterface"> {
 //===----------------------------------------------------------------------===//
 
 def Util_InferTypeSize : Util_TypeInterface<"InferTypeSizeInterface"> {
-
   let description = [{
     Allows types to be queried for their size by inserting the required logic.
   }];
@@ -1079,7 +1075,6 @@ def Util_InferTypeSize : Util_TypeInterface<"InferTypeSizeInterface"> {
 }
 
 def Util_SizeAwareType : Util_TypeInterface<"SizeAwareTypeInterface"> {
-
   let description = [{
     Denotes that a type is size-aware and must always have a size value
     associated with it in the IR. See `SizeAwareOp` for more information.
@@ -1100,7 +1095,6 @@ def Util_SizeAwareType : Util_TypeInterface<"SizeAwareTypeInterface"> {
 }
 
 def Util_SizeAwareOp : Util_OpInterface<"SizeAwareOpInterface"> {
-
   let description = [{
     An operation that is able to provide size values for all size-aware operands
     and results.
@@ -1129,7 +1123,6 @@ def Util_SizeAwareOp : Util_OpInterface<"SizeAwareOpInterface"> {
 }
 
 def Util_SizedStorageAttr : Util_AttrInterface<"SizedStorageAttr"> {
-
   let description = [{
     Interface used to query storage requirements for an attribute that is backed
     by physical storage (memory, disk, or external API).
@@ -1154,7 +1147,6 @@ def Util_SizedStorageAttr : Util_AttrInterface<"SizedStorageAttr"> {
 //===----------------------------------------------------------------------===//
 
 def Util_ReferenceType : Util_TypeInterface<"ReferenceTypeInterface"> {
-
   let description = [{
     Interface used to mark types as passed by-reference. These types may have
     aliases/ties or be convertable into forms that do. This is in contrast to
@@ -1167,7 +1159,6 @@ def Util_ReferenceType : Util_TypeInterface<"ReferenceTypeInterface"> {
 //===----------------------------------------------------------------------===//
 
 def Util_GlobalType : Util_TypeInterface<"GlobalTypeInterface"> {
-
   let description = [{
     Interface used to mark types as supported for global variables.
   }];
@@ -1201,7 +1192,6 @@ def Util_GlobalType : Util_TypeInterface<"GlobalTypeInterface"> {
 //===----------------------------------------------------------------------===//
 
 def Util_HoistableAttrInterface : Util_AttrInterface<"HoistableAttrInterface"> {
-
   let description = [{
     Interface used to control hoisting of dialect attributes associated with
     ops that are hoisted. Attributes implementing this interface can opt into
@@ -1241,7 +1231,6 @@ def Util_HoistableAttrInterface : Util_AttrInterface<"HoistableAttrInterface"> {
 }
 
 def Util_HoistableOpInterface : Util_OpInterface<"HoistableOpInterface"> {
-
   let description = [{
     Interface used to control hoisting of ops into globals.
   }];
@@ -1303,7 +1292,6 @@ def Util_HoistableOpInterface : Util_OpInterface<"HoistableOpInterface"> {
 }
 
 def Util_HoistableType : Util_TypeInterface<"HoistableTypeInterface"> {
-
   let description = [{
     Interface used to control hoisting of variables into globals. It can be
     used to insert IR immediately before storing a global and after loading it
@@ -1394,7 +1382,6 @@ def Util_HoistableType : Util_TypeInterface<"HoistableTypeInterface"> {
 //===----------------------------------------------------------------------===//
 
 def Util_SubrangeType : Util_TypeInterface<"SubrangeTypeInterface"> {
-
   let description = [{
     Interface used on size-aware types that can represent linear subranges as an
     (offset, length).
@@ -1421,7 +1408,6 @@ def Util_SubrangeType : Util_TypeInterface<"SubrangeTypeInterface"> {
 }
 
 def Util_SubrangeOp : Util_OpInterface<"SubrangeOpInterface"> {
-
   let description = [{
     A size-aware operation taking a subrange on a resource.
   }];
@@ -1477,7 +1463,6 @@ def Util_SubrangeOp : Util_OpInterface<"SubrangeOpInterface"> {
 }
 
 def Util_SubrangeOperandOpInterface : Util_OpInterface<"SubrangeOperandOpInterface"> {
-
   let description = [{
     Interface for operations that consume subranges of size-aware resources.
     The methods are used to manipulate the subranges during transformation.
@@ -1537,7 +1522,6 @@ def Util_CallAnnotationAttrInterface : Util_AttrInterface<"CallAnnotationAttrInt
 //===----------------------------------------------------------------------===//
 
 def Util_InliningPolicyAttrInterface : Util_AttrInterface<"InliningPolicyAttrInterface"> {
-
   let description = [{
     Interface allowing attributes to control the inlining behavior of functions
     and globals they are associated with.
@@ -1568,7 +1552,6 @@ def Util_SerializableAttrInterface :
   Util_AttrInterface<"SerializableAttrInterface", [
     Util_SizedStorageAttr,
   ]> {
-
   let description = [{
     Interface used to serialize constant values in binary format.
     Implementations are responsible for encoding and may do so in any form they

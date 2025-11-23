@@ -1,0 +1,11 @@
+# Copyright 2025 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# Loom dialect follows stricter formatting than the base IREE style.
+# InsertBraces ensures all control flow statements have explicit braces,
+# avoiding potential "goto fail"-style bugs.
+BasedOnStyle: Google
+InsertBraces: true

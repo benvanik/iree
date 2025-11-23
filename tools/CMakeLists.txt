@@ -302,6 +302,12 @@ if(IREE_BUILD_COMPILER)
       "iree-tblgen.cpp"
       "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/Dialect/VM/Tools/VMOpEncoderGen.cpp"
       "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/Dialect/VM/Tools/VMOpTableGen.cpp"
+      "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/TableGen/ConstraintGen.cpp"
+      "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/TableGen/DialectJSONGen.cpp"
+      "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/TableGen/ErrorGen.cpp"
+      "${IREE_SOURCE_DIR}/compiler/src/iree/compiler/TableGen/Utils.cpp"
+    COPTS
+      "-I${IREE_SOURCE_DIR}/compiler/src/iree/compiler/TableGen"
     DEPS
       LLVMSupport
       MLIRTblgenLib

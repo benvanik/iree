@@ -1,0 +1,267 @@
+# Copyright 2025 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load(
+    "//build_tools/bazel:build_defs.oss.bzl",
+    "iree_compiler_cc_library",
+    "iree_gentbl_cc_library",
+    "iree_tablegen_doc",
+    "iree_td_library",
+)
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+#===------------------------------------------------------------------------===#
+# TableGen libraries
+#===------------------------------------------------------------------------===#
+
+# Base IR tablegen - types, attrs, interfaces, errors.
+# Op groups (Tile/, Test/) have their own td_files that depend on this.
+iree_td_library(
+    name = "td_files",
+    srcs = [
+        "LoomAttrs.td",
+        "LoomBase.td",
+        "LoomConstraints.td",
+        "LoomDialect.td",
+        "LoomErrors.td",
+        "LoomInterfaces.td",
+        "LoomTypes.td",
+    ],
+    deps = [
+        "//compiler/src/iree/compiler/Dialect/Util/IR:td_files",
+        "//compiler/src/iree/compiler/Utils:td_files",
+        "@llvm-project//mlir:BuiltinDialectTdFiles",
+        "@llvm-project//mlir:InferTypeOpInterfaceTdFiles",
+        "@llvm-project//mlir:OpBaseTdFiles",
+        "@llvm-project//mlir:SideEffectInterfacesTdFiles",
+        "@llvm-project//mlir:ViewLikeInterfaceTdFiles",
+    ],
+)
+
+# Aggregates all ops for constraint generation.
+# Constraints need to see op definitions to generate trait instantiations.
+iree_td_library(
+    name = "all_ops_td_files",
+    srcs = [
+        "LoomOps.td",
+    ],
+    deps = [
+        ":td_files",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR/Tensor:td_files",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR/Test:td_files",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR/Tile:td_files",
+    ],
+)
+
+#===------------------------------------------------------------------------===#
+# Code generation - base types only
+#===------------------------------------------------------------------------===#
+
+iree_gentbl_cc_library(
+    name = "AttrsGen",
+    tbl_outs = [
+        (
+            [
+                "--gen-attrdef-decls",
+                "--attrdefs-dialect=loom",
+            ],
+            "LoomAttrs.h.inc",
+        ),
+        (
+            [
+                "--gen-attrdef-defs",
+                "--attrdefs-dialect=loom",
+            ],
+            "LoomAttrs.cpp.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "LoomAttrs.td",
+    deps = [":td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "ConstraintsGen",
+    tbl_outs = [
+        (
+            [
+                "--dialect=Loom",
+                "--gen-iree-constraint-traits",
+            ],
+            "LoomConstraints.h.inc",
+        ),
+    ],
+    tblgen = "//tools:iree-tblgen",
+    td_file = "LoomOps.td",
+    deps = [":all_ops_td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "ErrorsGen",
+    tbl_outs = [
+        (
+            ["--gen-iree-error-structs"],
+            "LoomErrors.h",
+        ),
+    ],
+    tblgen = "//tools:iree-tblgen",
+    td_file = "LoomErrors.td",
+    deps = [":td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "DialectGen",
+    tbl_outs = [
+        (
+            ["--gen-dialect-decls"],
+            "LoomDialect.h.inc",
+        ),
+        (
+            ["--gen-dialect-defs"],
+            "LoomDialect.cpp.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "LoomDialect.td",
+    deps = [":td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "InterfacesGen",
+    tbl_outs = [
+        (
+            ["--gen-attr-interface-decls"],
+            "LoomInterfaces.h.inc",
+        ),
+        (
+            ["--gen-attr-interface-defs"],
+            "LoomInterfaces.cpp.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "LoomInterfaces.td",
+    deps = [":td_files"],
+)
+
+iree_gentbl_cc_library(
+    name = "TypesGen",
+    tbl_outs = [
+        (
+            [
+                "--gen-typedef-decls",
+                "--typedefs-dialect=loom",
+            ],
+            "LoomTypes.h.inc",
+        ),
+        (
+            [
+                "--gen-typedef-defs",
+                "--typedefs-dialect=loom",
+            ],
+            "LoomTypes.cpp.inc",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "LoomTypes.td",
+    deps = [":td_files"],
+)
+
+#===------------------------------------------------------------------------===#
+# Documentation generation
+#===------------------------------------------------------------------------===#
+
+iree_tablegen_doc(
+    name = "LoomDialectDocGen",
+    category = "Dialects",
+    tbl_outs = [
+        (
+            [
+                "--gen-dialect-doc",
+                "-dialect=loom",
+            ],
+            "LoomDialect.md",
+        ),
+    ],
+    tblgen = "@llvm-project//mlir:mlir-tblgen",
+    td_file = "LoomDialect.td",
+    deps = [":td_files"],
+)
+
+#===------------------------------------------------------------------------===#
+# C++ libraries
+#===------------------------------------------------------------------------===#
+
+# Base IR library - types, attrs, interfaces, errors.
+# NO ops, NO dialect initialization.
+# Code that only needs types/interfaces can depend on just this.
+iree_compiler_cc_library(
+    name = "IR",
+    srcs = [
+        "LoomAttrs.cpp",
+        "LoomInterfaces.cpp",
+        "LoomOpUtils.cpp",
+        "LoomTypes.cpp",
+    ],
+    hdrs = [
+        "LoomAttrs.h",
+        "LoomConstraints.h",
+        "LoomDialect.h",
+        "LoomInterfaces.h",
+        "LoomOpUtils.h",
+        "LoomTypes.h",
+    ],
+    textual_hdrs = [
+        "LoomAttrs.cpp.inc",
+        "LoomAttrs.h.inc",
+        "LoomConstraints.h.inc",
+        "LoomDialect.cpp.inc",
+        "LoomDialect.h.inc",
+        "LoomErrors.h",
+        "LoomInterfaces.cpp.inc",
+        "LoomInterfaces.h.inc",
+        "LoomTypes.cpp.inc",
+        "LoomTypes.h.inc",
+    ],
+    deps = [
+        ":AttrsGen",
+        ":ConstraintsGen",
+        ":DialectGen",
+        ":ErrorsGen",
+        ":InterfacesGen",
+        ":TypesGen",
+        "//compiler/src/iree/compiler/Dialect/Util/IR",
+        "//compiler/src/iree/compiler/Utils",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+        "@llvm-project//mlir:InferTypeOpInterface",
+        "@llvm-project//mlir:SideEffectInterfaces",
+        "@llvm-project//mlir:Support",
+        "@llvm-project//mlir:UBDialect",
+        "@llvm-project//mlir:ViewLikeInterface",
+    ],
+)
+
+# Full dialect with all ops registered.
+# Tools/passes that need the complete dialect should depend on this.
+iree_compiler_cc_library(
+    name = "LoomDialect",
+    srcs = [
+        "LoomDialect.cpp",
+    ],
+    deps = [
+        ":IR",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR/Tensor",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR/Test",
+        "//compiler/src/iree/compiler/Dialect/Loom/IR/Tile",
+        "@llvm-project//llvm:Support",
+        "@llvm-project//mlir:IR",
+    ],
+)

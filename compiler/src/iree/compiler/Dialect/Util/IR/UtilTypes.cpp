@@ -6,7 +6,9 @@
 
 #include "iree/compiler/Dialect/Util/IR/UtilTypes.h"
 #include "iree/compiler/Dialect/Util/IR/UtilDialect.h"
+#include "iree/compiler/Dialect/Util/IR/UtilErrors.h"
 #include "iree/compiler/Dialect/Util/IR/UtilOps.h"
+#include "iree/compiler/Utils/Diagnostics.h"
 #include "llvm/ADT/BitVector.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -657,6 +659,44 @@ Value SizeAwareTypeInterface::queryValueSize(Location loc, Value resourceValue,
 //===----------------------------------------------------------------------===//
 // IREE::Util::ShapeAware*
 //===----------------------------------------------------------------------===//
+
+LogicalResult detail::verifyShapeAwareOp(ShapeAwareOpInterface shapeOp) {
+  Operation *op = shapeOp.getOperation();
+
+  // Verify operand dynamic dims.
+  for (unsigned i = 0; i < op->getNumOperands(); ++i) {
+    auto shapedType = dyn_cast<ShapedType>(op->getOperand(i).getType());
+    if (!shapedType)
+      continue;
+
+    ValueRange dynamicDims = shapeOp.getOperandDynamicDims(i);
+    unsigned expected = shapedType.getNumDynamicDims();
+    unsigned provided = dynamicDims.size();
+
+    if (expected != provided) {
+      return emitErrorCode<Errors::ERR_UTIL_SHAPE_0010>(
+          op, "operand", Type(shapedType), expected, provided);
+    }
+  }
+
+  // Verify result dynamic dims.
+  for (unsigned i = 0; i < op->getNumResults(); ++i) {
+    auto shapedType = dyn_cast<ShapedType>(op->getResult(i).getType());
+    if (!shapedType)
+      continue;
+
+    ValueRange dynamicDims = shapeOp.getResultDynamicDims(i);
+    unsigned expected = shapedType.getNumDynamicDims();
+    unsigned provided = dynamicDims.size();
+
+    if (expected != provided) {
+      return emitErrorCode<Errors::ERR_UTIL_SHAPE_0010>(
+          op, "result", Type(shapedType), expected, provided);
+    }
+  }
+
+  return success();
+}
 
 std::optional<ValueRange> findDynamicDims(Value workValue) {
   // Look up the use-def chain: always safe, as any value we reach dominates

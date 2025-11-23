@@ -1,0 +1,30 @@
+# Copyright 2025 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+# TableGen generator implementations for IREE.
+# These are compiled directly into iree-tblgen, not as a separate library,
+# because TableGen tools must be statically linked against internal LLVM
+# libraries and cannot depend on anything outside upstream TableGen libs.
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],  # Apache 2.0
+)
+
+# Source files for IREE TableGen generators.
+# Used by tools/BUILD.bazel to compile directly into iree-tblgen.
+# Each .cpp file registers its own generators via static GenRegistration.
+filegroup(
+    name = "GenSrcs",
+    srcs = [
+        "ConstraintGen.cpp",
+        "DialectJSONGen.cpp",
+        "ErrorGen.cpp",
+        "Utils.cpp",
+        "Utils.h",
+    ],
+)
