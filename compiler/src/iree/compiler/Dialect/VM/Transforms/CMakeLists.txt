@@ -23,6 +23,7 @@ iree_cc_library(
     "DropUnusedCalls.cpp"
     "GlobalInitialization.cpp"
     "HoistInlinedRodata.cpp"
+    "MaterializeRefDiscards.cpp"
     "OrdinalAllocation.cpp"
     "Passes.cpp"
     "ReifyRodataTables.cpp"
