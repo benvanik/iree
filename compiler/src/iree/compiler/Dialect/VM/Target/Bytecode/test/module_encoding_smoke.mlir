@@ -21,7 +21,7 @@ vm.module @simple_module {
   // CHECK-NEXT:   "requirements": "EXT_F32"
   // CHECK-NEXT:   "reserved": 0
   // CHECK-NEXT:   "block_count": 1
-  // CHECK-NEXT:   "i32_register_count": 1
+  // CHECK-NEXT:   "i32_register_count": 2
   // CHECK-NEXT:   "ref_register_count": 0
   // CHECK-NEXT: }
   vm.func @func(%arg0 : f32) -> f32 {
@@ -37,12 +37,12 @@ vm.module @simple_module {
   // CHECK-NEXT:   0,
   // CHECK-NEXT:   0,
   // CHECK-NEXT:   0,
-  // CHECK-NEXT:   0,
+  // CHECK-NEXT:   1,
   // CHECK-NEXT:   0,
   // CHECK-NEXT:   90,
   // CHECK-NEXT:   1,
   // CHECK-NEXT:   0,
-  // CHECK-NEXT:   0,
+  // CHECK-NEXT:   1,
   // CHECK-NEXT:   0,
   // CHECK-NEXT:   0,
   // CHECK-NEXT:   0

@@ -31,6 +31,9 @@ struct FuncAnalysis {
   FuncAnalysis(IREE::VM::FuncOp funcOp) {
     Operation *op = funcOp.getOperation();
     registerAllocation = RegisterAllocation(op);
+    if (!registerAllocation.has_value()) {
+      llvm::report_fatal_error("register allocation failed for emitc");
+    }
     valueLiveness = ValueLiveness(op);
     originalFunctionType = funcOp.getFunctionType();
     callingConvention = makeCallingConventionString(funcOp).value();
@@ -99,8 +102,9 @@ struct FuncAnalysis {
   bool isMove(Value ref, Operation *op) {
     assert(isa<IREE::VM::RefType>(ref.getType()));
     assert(valueLiveness.has_value());
-    bool lastUse = valueLiveness.value().isLastValueUse(ref, op);
-    return lastUse && false;
+    // NOTE: EmitC codegen doesn't support MOVE semantics - always use
+    // retain/assign instead of move. The && false disables MOVE intentionally.
+    return valueLiveness.value().isLastValueUse(ref, op) && false;
   }
 
   void cacheLocalRef(int64_t ordinal, Value ref) {

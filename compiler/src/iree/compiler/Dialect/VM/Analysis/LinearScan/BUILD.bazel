@@ -1,4 +1,4 @@
-# Copyright 2021 The IREE Authors
+# Copyright 2025 The IREE Authors
 #
 # Licensed under the Apache License v2.0 with LLVM Exceptions.
 # See https://llvm.org/LICENSE.txt for license information.
@@ -13,27 +13,21 @@ package(
 )
 
 iree_compiler_cc_library(
-    name = "Analysis",
+    name = "LinearScan",
     srcs = [
-        "LiveIntervalsTest.cpp",
-        "RegisterAllocation.cpp",
-        "RegisterAllocationTest.cpp",
-        "ValueLiveness.cpp",
-        "ValueLivenessTest.cpp",
+        "LiveIntervals.cpp",
+        "RegisterBank.cpp",
     ],
     hdrs = [
-        "RegisterAllocation.h",
-        "TestPasses.h",
-        "ValueLiveness.h",
+        "LiveIntervals.h",
+        "RegisterBank.h",
     ],
     deps = [
         "//compiler/src/iree/compiler/Dialect/Util/IR",
-        "//compiler/src/iree/compiler/Dialect/VM/Analysis/LinearScan",
         "//compiler/src/iree/compiler/Dialect/VM/IR",
         "@llvm-project//llvm:Support",
         "@llvm-project//mlir:Analysis",
         "@llvm-project//mlir:IR",
-        "@llvm-project//mlir:Pass",
         "@llvm-project//mlir:Support",
     ],
 )
