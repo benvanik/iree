@@ -12,6 +12,8 @@
 
 namespace mlir::iree_compiler {
 
+class RegisterAllocation;
+
 // Interface for encoding of VM operations within functions.
 // This base manages source map construction and vm.func walking while
 // subclasses provide actual emission.
@@ -71,11 +73,25 @@ public:
   // Encodes a variable list of operands (by reference), including a count.
   virtual LogicalResult encodeOperands(Operation::operand_range values) = 0;
 
+  // Encodes a filtered list of operands (by reference), including a count.
+  // Each pair contains the value and its original operand index for MOVE bit
+  // computation.
+  virtual LogicalResult
+  encodeOperands(ArrayRef<std::pair<Value, int>> valuesWithIndices) = 0;
+
   // Encodes a result value (by reference).
   virtual LogicalResult encodeResult(Value value) = 0;
 
   // Encodes a variable list of results (by reference), including a count.
   virtual LogicalResult encodeResults(Operation::result_range values) = 0;
+
+  // Returns the register allocation analysis, if available.
+  // Bytecode encoder provides this; other encoders (e.g., EmitC) return
+  // nullptr. Ops can use this for register-allocation-aware encoding decisions
+  // such as per-operand elision.
+  virtual const RegisterAllocation *getRegisterAllocation() const {
+    return nullptr;
+  }
 };
 
 } // namespace mlir::iree_compiler
