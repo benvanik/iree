@@ -9,6 +9,7 @@
 
 include "iree/compiler/Dialect/Loom/IR/LoomConstraints.td"
 include "iree/compiler/Dialect/Loom/IR/LoomErrors.td"
+include "iree/compiler/Dialect/Loom/IR/LoomInterfaces.td"
 include "iree/compiler/Dialect/Util/IR/UtilConstraints.td"
 include "iree/compiler/Dialect/Util/IR/UtilInterfaces.td"
 include "mlir/IR/OpBase.td"
@@ -34,6 +35,7 @@ def Loom_TensorUpdateOp : Loom_PureOp<"loom.tensor.update", [
     "getTiedResultOperandIndex",
     "getTiedResultOperandIndices",
   ]>,
+  DeclareOpInterfaceMethods<Loom_CopySubrangeOpInterface>,
   Loom_TensorUpdateOffsetCountMatchesRank<"target", "static_offsets">,
   Loom_TensorUpdateRanksMatch<"update", "target">,
   Loom_SameElementType<["update", "target"]>,

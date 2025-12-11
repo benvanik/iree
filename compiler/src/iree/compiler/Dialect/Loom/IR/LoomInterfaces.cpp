@@ -8,15 +8,11 @@
 
 #include "iree/compiler/Dialect/Loom/IR/LoomDialect.h"
 
-// Placeholder for future custom interface implementations.
-// When interfaces are added to LoomInterfaces.td, include the generated .inc:
-//
-// #include "iree/compiler/Dialect/Loom/IR/LoomOpInterfaces.cpp.inc"
-// #include "iree/compiler/Dialect/Loom/IR/LoomTypeInterfaces.cpp.inc"
-// #include "iree/compiler/Dialect/Loom/IR/LoomAttrInterfaces.cpp.inc"
+// Include generated interface definitions.
+#include "iree/compiler/Dialect/Loom/IR/LoomInterfaces.cpp.inc"
 
 namespace mlir::iree_compiler::IREE::Loom {
 
-// Placeholder namespace - interface method implementations will go here.
+// Interface-specific utility implementations can go here if needed.
 
 }  // namespace mlir::iree_compiler::IREE::Loom

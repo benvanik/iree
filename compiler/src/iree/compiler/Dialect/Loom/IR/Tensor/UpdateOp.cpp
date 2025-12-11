@@ -93,6 +93,51 @@ SmallVector<OpFoldResult> TensorUpdateOp::getMixedStrides() {
 }
 
 //===----------------------------------------------------------------------===//
+// CopySubrangeOpInterface
+//===----------------------------------------------------------------------===//
+
+Value TensorUpdateOp::getSubrangeSource() {
+  // For update ops, the "source" being copied is the update tile.
+  return getUpdate();
+}
+
+ValueRange TensorUpdateOp::getSourceDynamicDims() { return getUpdateDims(); }
+
+ArrayRef<int64_t> TensorUpdateOp::getSourceShape() {
+  return getUpdateType().getShape();
+}
+
+SmallVector<OpFoldResult> TensorUpdateOp::getSourceMixedOffsets() {
+  // We read the entire update tile (offsets are all zero).
+  SmallVector<OpFoldResult> offsets;
+  Builder b(getContext());
+  for (int64_t i = 0; i < getRank(); ++i) {
+    offsets.push_back(b.getIndexAttr(0));
+  }
+  return offsets;
+}
+
+SmallVector<OpFoldResult> TensorUpdateOp::getSourceMixedSizes() {
+  return getMixedSizes();
+}
+
+Value TensorUpdateOp::getSubrangeTarget() { return getTarget(); }
+
+ValueRange TensorUpdateOp::getTargetDynamicDims() { return getTargetDims(); }
+
+ArrayRef<int64_t> TensorUpdateOp::getTargetShape() {
+  return getTargetType().getShape();
+}
+
+SmallVector<OpFoldResult> TensorUpdateOp::getTargetMixedOffsets() {
+  return getMixedOffsets();
+}
+
+SmallVector<OpFoldResult> TensorUpdateOp::getTargetMixedSizes() {
+  return getMixedSizes();
+}
+
+//===----------------------------------------------------------------------===//
 // Canonicalization
 //===----------------------------------------------------------------------===//
 
@@ -133,64 +178,6 @@ struct FoldTensorUpdateConstantOffsets
         op.getUpdateDims(), newDynamicOffsets,
         rewriter.getDenseI64ArrayAttr(newStaticOffsets));
     return success();
-  }
-};
-
-// Fold update with poison target to poison.
-// update(%tile, poison) -> poison
-// Note: We intentionally do NOT fold when only the update tile is poison.
-// A poison tile inserted into a valid tensor only poisons that subregion,
-// not the entire tensor. This matches LLVM's memory semantics where storing
-// poison only affects the stored bytes, not surrounding memory.
-struct FoldTensorUpdateOfPoison : public OpRewritePattern<TensorUpdateOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TensorUpdateOp op,
-                                PatternRewriter& rewriter) const override {
-    // Only fold if target tensor is poison - the entire tensor was already UB.
-    auto poisonOp = op.getTarget().getDefiningOp<ub::PoisonOp>();
-    if (!poisonOp) {
-      return failure();
-    }
-
-    return replaceWithPoisonAndRemark(
-        rewriter, op, "update target tensor is poison", poisonOp);
-  }
-};
-
-// Fold out-of-bounds update to poison (UB).
-// update %tile, %tensor[offset] where offset + size > tensor_dim -> poison
-struct FoldTensorUpdateOutOfBounds : public OpRewritePattern<TensorUpdateOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TensorUpdateOp op,
-                                PatternRewriter& rewriter) const override {
-    SmallVector<OpFoldResult> offsets = op.getMixedOffsets();
-    SmallVector<OpFoldResult> sizes = op.getMixedSizes();
-    TensorType targetType = op.getTargetType();
-    ArrayRef<int64_t> targetDims = targetType.getShape();
-
-    // Check each dimension for out-of-bounds.
-    for (size_t i = 0; i < offsets.size(); ++i) {
-      auto offsetAttr = dyn_cast<Attribute>(offsets[i]);
-      auto sizeAttr = dyn_cast<Attribute>(sizes[i]);
-      int64_t targetDim = targetDims[i];
-
-      // Need static values to prove out-of-bounds.
-      if (!offsetAttr || !sizeAttr || ShapedType::isDynamic(targetDim)) {
-        continue;
-      }
-
-      int64_t offset = cast<IntegerAttr>(offsetAttr).getInt();
-      int64_t size = cast<IntegerAttr>(sizeAttr).getInt();
-
-      if (offset + size > targetDim) {
-        return replaceWithPoisonAndRemark(
-            rewriter, op, "update extends beyond tensor bounds (UB)");
-      }
-    }
-
-    return failure();
   }
 };
 
@@ -273,8 +260,7 @@ struct FoldTensorUpdateOverUpdate : public OpRewritePattern<TensorUpdateOp> {
 
 void TensorUpdateOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                                  MLIRContext* context) {
-  results.add<FoldTensorUpdateConstantOffsets, FoldTensorUpdateOfPoison,
-              FoldTensorUpdateOutOfBounds, FoldTensorUpdateOfSlice,
+  results.add<FoldTensorUpdateConstantOffsets, FoldTensorUpdateOfSlice,
               FoldTensorUpdateOverUpdate>(context);
 }
 

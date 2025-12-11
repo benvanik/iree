@@ -47,6 +47,7 @@ iree_cc_library(
   SRCS
     "BroadcastOp.cpp"
     "ConstantOp.cpp"
+    "CopyOp.cpp"
     "DimOp.cpp"
     "ElementwiseOp.cpp"
     "FillOp.cpp"

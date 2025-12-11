@@ -27,6 +27,7 @@ iree_td_library(
         "AllocaOp.td",
         "BroadcastOp.td",
         "ConstantOp.td",
+        "CopyOp.td",
         "DimOp.td",
         "ElementwiseOp.td",
         "FillOp.td",
@@ -91,6 +92,7 @@ iree_compiler_cc_library(
     srcs = [
         "BroadcastOp.cpp",
         "ConstantOp.cpp",
+        "CopyOp.cpp",
         "DimOp.cpp",
         "ElementwiseOp.cpp",
         "FillOp.cpp",

@@ -9,6 +9,7 @@
 
 include "iree/compiler/Dialect/Loom/IR/LoomConstraints.td"
 include "iree/compiler/Dialect/Loom/IR/LoomErrors.td"
+include "iree/compiler/Dialect/Loom/IR/LoomInterfaces.td"
 include "iree/compiler/Dialect/Util/IR/UtilConstraints.td"
 include "iree/compiler/Dialect/Util/IR/UtilInterfaces.td"
 include "mlir/IR/OpBase.td"
@@ -28,6 +29,7 @@ def Loom_TensorSliceDocMetadata : Util_OpDocMetadata {
 def Loom_TensorSliceOp : Loom_PureOp<"loom.tensor.slice", [
   Util_ShapeAwareOp,
   AttrSizedOperandSegments,
+  DeclareOpInterfaceMethods<Loom_CopySubrangeOpInterface>,
   Loom_TensorSliceOffsetCountMatchesRank<"source", "static_offsets">,
   Loom_TensorSliceRanksMatch<"source", "result">,
   Loom_SameElementType<["source", "result"]>,

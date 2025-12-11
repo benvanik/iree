@@ -58,8 +58,10 @@ iree_tablegen_library(
   TD_FILE
     "LoomInterfaces.td"
   OUTS
-    --gen-attr-interface-decls LoomInterfaces.h.inc
-    --gen-attr-interface-defs LoomInterfaces.cpp.inc
+    --gen-attr-interface-decls LoomAttrInterfaces.h.inc
+    --gen-attr-interface-defs LoomAttrInterfaces.cpp.inc
+    --gen-op-interface-decls LoomInterfaces.h.inc
+    --gen-op-interface-defs LoomInterfaces.cpp.inc
 )
 
 iree_tablegen_library(
@@ -91,9 +93,12 @@ iree_cc_library(
     "LoomConstraints.h"
     "LoomDialect.h"
     "LoomInterfaces.h"
+    "LoomOpPatterns.h"
     "LoomOpUtils.h"
     "LoomTypes.h"
   TEXTUAL_HDRS
+    "LoomAttrInterfaces.cpp.inc"
+    "LoomAttrInterfaces.h.inc"
     "LoomAttrs.cpp.inc"
     "LoomAttrs.h.inc"
     "LoomConstraints.h.inc"
@@ -107,6 +112,7 @@ iree_cc_library(
   SRCS
     "LoomAttrs.cpp"
     "LoomInterfaces.cpp"
+    "LoomOpPatterns.cpp"
     "LoomOpUtils.cpp"
     "LoomTypes.cpp"
   DEPS

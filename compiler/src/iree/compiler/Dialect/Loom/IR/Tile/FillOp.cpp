@@ -21,11 +21,7 @@ LogicalResult TileFillOp::verify() {
   Type elementType = cast<TileType>(getTarget().getType()).getElementType();
 
   if (valueType != elementType) {
-    Errors::ERR_LOOM_FILL_0001::emit(getOperation(),
-                                     Errors::ERR_LOOM_FILL_0001::Args{
-                                         .valueType = valueType,
-                                         .elementType = elementType,
-                                     });
+    Errors::ERR_LOOM_FILL_0001::emit(getOperation(), {valueType, elementType});
     return failure();
   }
   return success();

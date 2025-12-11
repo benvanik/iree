@@ -9,6 +9,7 @@
 
 include "iree/compiler/Dialect/Loom/IR/LoomConstraints.td"
 include "iree/compiler/Dialect/Loom/IR/LoomErrors.td"
+include "iree/compiler/Dialect/Loom/IR/LoomInterfaces.td"
 include "iree/compiler/Dialect/Util/IR/UtilConstraints.td"
 include "iree/compiler/Dialect/Util/IR/UtilInterfaces.td"
 include "mlir/IR/OpBase.td"
@@ -34,6 +35,7 @@ def Loom_TileUpdateOp : Loom_PureOp<"loom.tile.update", [
     "getTiedResultOperandIndex",
     "getTiedResultOperandIndices",
   ]>,
+  DeclareOpInterfaceMethods<Loom_CopySubrangeOpInterface>,
   Loom_TileUpdateOffsetCountMatchesRank<"target", "static_offsets">,
   Loom_TileUpdateRanksMatch<"update", "target">,
   Loom_SameElementType<["update", "target"]>,

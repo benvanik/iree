@@ -393,9 +393,88 @@ def ERR_LOOM_DIM_0001 : Loom_Error<"DIM", "0001"> {
 }
 
 //===----------------------------------------------------------------------===//
-// Slice Errors (SLICE domain)
+// Subrange Errors (SUBRANGE domain)
 //===----------------------------------------------------------------------===//
-// For loom.tensor.slice and loom.tile.slice operations.
+// Generic errors for subrange operations (slice, update, copy).
+// These use '{operandName}' templating so the error messages describe which
+// operand has the problem, making them reusable across all subrange ops.
+
+def ERR_LOOM_SUBRANGE_0001 : Loom_Error<"SUBRANGE", "0001"> {
+  let summary = [{Offset count must match operand rank.}];
+  let description = [{
+    The number of offsets provided must exactly match the rank of the
+    corresponding operand. Each dimension needs exactly one offset.
+    This applies to source offsets, target offsets, or any other offset array.
+  }];
+  let message = [{
+    '{operandName}' offset count ({offsetCount}) does not match rank ({rank})
+  }];
+  let schema = (ins
+    StringRefParameter<>:$operandName,
+    "unsigned":$offsetCount,
+    "int64_t":$rank
+  );
+  let fixHint = [{Provide exactly {rank} offsets for '{operandName}'}];
+  let example = [{
+    // Correct: 2 offsets for rank-2 operand
+    %tile = loom.tile.slice %src[0, 0] : !loom.tile<256x256xf16> -> !loom.tile<64x64xf16>
+    // Invalid: 1 offset for rank-2 operand
+    %tile = loom.tile.slice %src[0] : !loom.tile<256x256xf16> -> !loom.tile<64x64xf16>
+  }];
+}
+
+def ERR_LOOM_SUBRANGE_0002 : Loom_Error<"SUBRANGE", "0002"> {
+  let summary = [{Operand ranks must match.}];
+  let description = [{
+    Subrange operations do not support rank reduction or expansion.
+    The source and target (or result) must have the same rank.
+  }];
+  let message = [{
+    '{operand1Name}' rank ({rank1}) does not match '{operand2Name}' rank ({rank2})
+  }];
+  let schema = (ins
+    StringRefParameter<>:$operand1Name,
+    "int64_t":$rank1,
+    StringRefParameter<>:$operand2Name,
+    "int64_t":$rank2
+  );
+  let fixHint = [{'{operand1Name}' and '{operand2Name}' must have the same rank}];
+  let example = [{
+    // Correct: both rank-2
+    %tile = loom.tile.slice %src[0, 0] : !loom.tile<256x256xf16> -> !loom.tile<64x64xf16>
+    // Invalid: rank-1 result from rank-2 source
+    %tile = loom.tile.slice %src[0, 0] : !loom.tile<256x256xf16> -> !loom.tile<64xf16>
+  }];
+}
+
+def ERR_LOOM_SUBRANGE_0003 : Loom_Error<"SUBRANGE", "0003"> {
+  let summary = [{Size count must match operand rank.}];
+  let description = [{
+    The number of sizes provided must exactly match the rank of the
+    corresponding operand. Each dimension needs exactly one size.
+  }];
+  let message = [{
+    '{operandName}' size count ({sizeCount}) does not match rank ({rank})
+  }];
+  let schema = (ins
+    StringRefParameter<>:$operandName,
+    "unsigned":$sizeCount,
+    "int64_t":$rank
+  );
+  let fixHint = [{Provide exactly {rank} sizes for '{operandName}'}];
+  let example = [{
+    // Correct: 2 sizes for rank-2 copy
+    %r = loom.tile.copy %src[0, 0], %tgt[0, 0], [8, 8] : ...
+    // Invalid: 1 size for rank-2 copy
+    %r = loom.tile.copy %src[0, 0], %tgt[0, 0], [8] : ...
+  }];
+}
+
+//===----------------------------------------------------------------------===//
+// Slice Errors (SLICE domain) - DEPRECATED
+//===----------------------------------------------------------------------===//
+// These are kept for backward compatibility with existing constraints.
+// New code should use ERR_LOOM_SUBRANGE_* instead.
 
 def ERR_LOOM_SLICE_0001 : Loom_Error<"SLICE", "0001"> {
   let summary = [{Offset count must match source rank.}];
@@ -442,9 +521,10 @@ def ERR_LOOM_SLICE_0002 : Loom_Error<"SLICE", "0002"> {
 }
 
 //===----------------------------------------------------------------------===//
-// Update Errors (UPDATE domain)
+// Update Errors (UPDATE domain) - DEPRECATED
 //===----------------------------------------------------------------------===//
-// For loom.tensor.update and loom.tile.update operations.
+// These are kept for backward compatibility with existing constraints.
+// New code should use ERR_LOOM_SUBRANGE_* instead.
 
 def ERR_LOOM_UPDATE_0001 : Loom_Error<"UPDATE", "0001"> {
   let summary = [{Offset count must match target rank.}];
@@ -502,31 +582,154 @@ def ERR_LOOM_UPDATE_0002 : Loom_Error<"UPDATE", "0002"> {
 
 def ERR_LOOM_FOLD_0001 : Loom_Error<"FOLD", "0001"> {
   let severity = "remark";
-  let summary = [{Operation folded to poison due to provably invalid bounds.}];
+  let summary = [{Operation folded to poison (generic).}];
   let description = [{
-    Emitted as a remark during canonicalization when an operation is detected
-    to have undefined behavior (e.g., out-of-bounds access, impossible offset
-    constraints). The operation is replaced with `ub.poison` to propagate the
-    undefined behavior explicitly.
+    Generic fallback remark for canonicalization folds to poison that don't fit
+    a more specific error code. Prefer using specific codes (0002-0005) when
+    the reason is well-categorized.
+
+    Use this for complex or unusual UB cases, or when the reason requires
+    a custom string explanation.
   }];
   let message = [{
-    '{opName}' folded to poison: '{reason}'
+    '{opName}' folded to poison: {reason}
   }];
   let schema = (ins
     StringRefParameter<>:$opName,
     StringRefParameter<>:$reason
   );
   let fixHint = [{
-    Check the operation's bounds constraints. This indicates undefined behavior
-    in the source program. Common causes: non-zero offset with same-shape
-    slice/update, out-of-bounds static offset + size.
+    Check the operation's constraints. This indicates undefined behavior
+    in the source program.
   }];
   let example = [{
-    // Valid: offset 0 when shapes match
-    %t = loom.tile.slice %src[0, 0] : !loom.tile<4x4xf16> -> !loom.tile<4x4xf16>
+    // Complex constraint violation requiring custom explanation
+    // %t = loom.some.op %src : ... -> ...
+    // Remark: 'loom.some.op' folded to poison: specific reason here
+  }];
+}
 
-    // Invalid (UB): non-zero offset with same shape
-    // %t = loom.tile.slice %src[1, 0] : !loom.tile<4x4xf16> -> !loom.tile<4x4xf16>
+def ERR_LOOM_FOLD_0002 : Loom_Error<"FOLD", "0002"> {
+  let severity = "remark";
+  let summary = [{Slice source operand is poison.}];
+  let description = [{
+    Emitted when a slice operation reads from a source operand that is poison.
+    Reading from poison storage produces a poison result. This applies to
+    loom.tensor.slice and loom.tile.slice operations.
+
+    Note: For update operations, source poison does NOT propagate to the entire
+    result - only the subregion being written would be affected.
+  }];
+  let message = [{
+    '{opName}' folded to poison: source operand is poison
+  }];
+  let schema = (ins
+    StringRefParameter<>:$opName,
+    "Type":$sourceType
+  );
+  let fixHint = [{
+    The source operand was determined to be poison at compile time.
+    Check upstream operations that produce this value.
+  }];
+  let example = [{
+    // %poisoned_src is ub.poison
+    %tile = loom.tensor.slice %poisoned_src[0, 0]
+        : !loom.tensor<256x256xf16> -> !loom.tile<64x64xf16>
+    // Result: ub.poison : !loom.tile<64x64xf16>
+  }];
+}
+
+def ERR_LOOM_FOLD_0003 : Loom_Error<"FOLD", "0003"> {
+  let severity = "remark";
+  let summary = [{Update target operand is poison.}];
+  let description = [{
+    Emitted when an update operation writes into a target operand that is poison.
+    Writing INTO poison storage produces a poison result, regardless of the
+    update tile's contents. This applies to loom.tensor.update and
+    loom.tile.update operations.
+
+    Semantics: Like LLVM, updating a poison buffer yields poison. The storage
+    location itself being poison means the entire result is poison.
+  }];
+  let message = [{
+    '{opName}' folded to poison: target operand is poison
+  }];
+  let schema = (ins
+    StringRefParameter<>:$opName,
+    "Type":$targetType
+  );
+  let fixHint = [{
+    The target operand was determined to be poison at compile time.
+    Check upstream operations that produce this value.
+  }];
+  let example = [{
+    // %poisoned_target is ub.poison
+    %result = loom.tensor.update %tile, %poisoned_target[0, 0]
+        : !loom.tile<64x64xf16> -> !loom.tensor<256x256xf16>
+    // Result: ub.poison : !loom.tensor<256x256xf16>
+  }];
+}
+
+def ERR_LOOM_FOLD_0004 : Loom_Error<"FOLD", "0004"> {
+  let severity = "remark";
+  let summary = [{Subrange access extends beyond bounds.}];
+  let description = [{
+    Emitted when a slice or update operation is detected to have an out-of-bounds
+    access at compile time. Specifically, when offset + size > dimension bound
+    for any dimension, the access is undefined behavior.
+
+    This is a remark because the operation is folded to poison, indicating UB
+    in the source program that should be investigated.
+  }];
+  let message = [{
+    '{opName}' folded to poison: dimension {dimIndex} access at offset {offset} + size {size} = {total} exceeds bound {bound}
+  }];
+  let schema = (ins
+    StringRefParameter<>:$opName,
+    "int64_t":$dimIndex,
+    "int64_t":$offset,
+    "int64_t":$size,
+    "int64_t":$total,
+    "int64_t":$bound
+  );
+  let fixHint = [{
+    Ensure offset + size <= dimension bound for all dimensions.
+    Dimension {dimIndex}: {offset} + {size} = {total}, but bound is {bound}.
+  }];
+  let example = [{
+    // Invalid: offset 192 + size 128 = 320 > 256
+    %tile = loom.tensor.slice %src[192, 0]
+        : !loom.tensor<256x256xf16> -> !loom.tile<128x64xf16>
+    // Result: ub.poison : !loom.tile<128x64xf16>
+  }];
+}
+
+def ERR_LOOM_FOLD_0005 : Loom_Error<"FOLD", "0005"> {
+  let severity = "remark";
+  let summary = [{Subrange access has negative offset.}];
+  let description = [{
+    Emitted when a slice or update operation has a negative offset at compile
+    time. Offsets must be non-negative indices into the source/target.
+
+    This is a remark because the operation is folded to poison, indicating UB
+    in the source program that should be investigated.
+  }];
+  let message = [{
+    '{opName}' folded to poison: dimension {dimIndex} has negative offset {offset}
+  }];
+  let schema = (ins
+    StringRefParameter<>:$opName,
+    "int64_t":$dimIndex,
+    "int64_t":$offset
+  );
+  let fixHint = [{
+    Ensure offset >= 0 for all dimensions.
+    Dimension {dimIndex}: offset {offset} is negative.
+  }];
+  let example = [{
+    // Invalid: negative offset -1
+    // (In practice, negative offsets are rare in MLIR since indices
+    // are typically unsigned, but can occur through arithmetic)
   }];
 }
 

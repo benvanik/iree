@@ -166,10 +166,7 @@ Value createPoisonWithRemark(PatternRewriter& rewriter, Operation* op,
 
   // Emit structured remark with fixHint and examples.
   Errors::ERR_LOOM_FOLD_0001::emit(op,
-                                   Errors::ERR_LOOM_FOLD_0001::Args{
-                                       .opName = op->getName().getStringRef(),
-                                       .reason = fullReason,
-                                   });
+                                   {op->getName().getStringRef(), fullReason});
 
   // Create the poison value at the fused location with reason metadata.
   return ub::PoisonOp::create(rewriter, fusedLoc, resultType,

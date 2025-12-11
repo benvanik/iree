@@ -7,8 +7,11 @@
 #define IREE_COMPILER_DIALECT_LOOM_IR_LOOMINTERFACES_H_
 
 #include "mlir/IR/OpDefinition.h"
+#include "mlir/IR/OpImplementation.h"
 
-// Placeholder for future custom interfaces.
-// Interface class definitions will be generated here when interfaces are added.
+// clang-format off: must be included after all LLVM/MLIR headers
+#define GET_OP_INTERFACE_CLASSES
+#include "iree/compiler/Dialect/Loom/IR/LoomInterfaces.h.inc"
+// clang-format on
 
 #endif  // IREE_COMPILER_DIALECT_LOOM_IR_LOOMINTERFACES_H_

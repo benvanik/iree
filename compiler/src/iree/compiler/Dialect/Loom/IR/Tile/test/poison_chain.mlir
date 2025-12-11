@@ -1,6 +1,6 @@
 // RUN: iree-opt --canonicalize --split-input-file --verify-diagnostics %s
 
-// This test verifies that poison reason chains are properly built and reported
+// This test verifies that poison folds are properly detected and reported
 // when poison propagates through multiple operations.
 
 //===----------------------------------------------------------------------===//
@@ -9,12 +9,12 @@
 
 func.func @two_level_poison_chain(%src: !loom.tile<32x32xf16>) -> !loom.tile<8x8xf16> {
   // First slice is OOB (offset 30 + size 16 = 46 > 32) -> poison
-  // expected-remark @+3 {{ERR_LOOM_FOLD_0001: 'loom.tile.slice' folded to poison: 'slice extends beyond source bounds'}}
+  // expected-remark @+3 {{ERR_LOOM_FOLD_0004: 'loom.tile.slice' folded to poison: dimension 0 access at offset 30 + size 16 = 46 exceeds bound 32}}
   // expected-note @+2 {{Fix:}}
   // expected-note @+1 {{Example:}}
   %oob = loom.tile.slice %src[30, 0] : !loom.tile<32x32xf16> -> !loom.tile<16x16xf16>
-  // Second slice consumes poison -> propagates with chained reason
-  // expected-remark @+3 {{ERR_LOOM_FOLD_0001: 'loom.tile.slice' folded to poison: 'slice source is poison <- slice extends beyond source bounds'}}
+  // Second slice consumes poison -> propagates
+  // expected-remark @+3 {{ERR_LOOM_FOLD_0002: 'loom.tile.slice' folded to poison: source operand is poison}}
   // expected-note @+2 {{Fix:}}
   // expected-note @+1 {{Example:}}
   %subtile = loom.tile.slice %oob[0, 0] : !loom.tile<16x16xf16> -> !loom.tile<8x8xf16>
@@ -31,12 +31,12 @@ func.func @three_level_poison_chain(%good: !loom.tile<4x4xf32>) -> !loom.tile<4x
   // Start with poison
   %poison = ub.poison : !loom.tile<1x1xf32>
   // Broadcast poison -> poison (level 1)
-  // expected-remark @+3 {{ERR_LOOM_FOLD_0001: 'loom.tile.broadcast' folded to poison: 'broadcast operand is poison'}}
+  // expected-remark @+3 {{ERR_LOOM_FOLD_0001: 'loom.tile.broadcast' folded to poison: broadcast operand is poison}}
   // expected-note @+2 {{Fix:}}
   // expected-note @+1 {{Example:}}
   %bc = loom.tile.broadcast<right> %poison : !loom.tile<1x1xf32> -> !loom.tile<8x8xf32>
-  // Slice poison -> poison (level 2, chained)
-  // expected-remark @+3 {{ERR_LOOM_FOLD_0001: 'loom.tile.slice' folded to poison: 'slice source is poison <- broadcast operand is poison'}}
+  // Slice poison -> poison (level 2)
+  // expected-remark @+3 {{ERR_LOOM_FOLD_0002: 'loom.tile.slice' folded to poison: source operand is poison}}
   // expected-note @+2 {{Fix:}}
   // expected-note @+1 {{Example:}}
   %slice = loom.tile.slice %bc[0, 0] : !loom.tile<8x8xf32> -> !loom.tile<4x4xf32>
@@ -57,14 +57,14 @@ func.func @three_level_poison_chain(%good: !loom.tile<4x4xf32>) -> !loom.tile<4x
 //===----------------------------------------------------------------------===//
 
 func.func @update_poison_chain(%subtile: !loom.tile<16x16xf16>) -> !loom.tile<32x32xf16> {
-  // Create poison via impossible slice (same shape, non-zero offset)
+  // Create poison via OOB slice (same shape, non-zero offset is OOB)
   %alloca = loom.tile.alloca : !loom.tile<32x32xf16>
-  // expected-remark @+3 {{ERR_LOOM_FOLD_0001: 'loom.tile.slice' folded to poison: 'same-shape slice with non-zero offset is undefined behavior'}}
+  // expected-remark @+3 {{ERR_LOOM_FOLD_0004: 'loom.tile.slice' folded to poison: dimension 0 access at offset 1 + size 32 = 33 exceeds bound 32}}
   // expected-note @+2 {{Fix:}}
   // expected-note @+1 {{Example:}}
   %poison_target = loom.tile.slice %alloca[1, 0] : !loom.tile<32x32xf16> -> !loom.tile<32x32xf16>
   // Update into poison target -> propagates
-  // expected-remark @+3 {{ERR_LOOM_FOLD_0001: 'loom.tile.update' folded to poison: 'update target is poison <- same-shape slice with non-zero offset is undefined behavior'}}
+  // expected-remark @+3 {{ERR_LOOM_FOLD_0003: 'loom.tile.update' folded to poison: target operand is poison}}
   // expected-note @+2 {{Fix:}}
   // expected-note @+1 {{Example:}}
   %result = loom.tile.update %subtile, %poison_target[0, 0] : !loom.tile<16x16xf16> -> !loom.tile<32x32xf16>

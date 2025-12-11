@@ -35,6 +35,7 @@ def Loom_Dialect : Dialect {
   let useDefaultTypePrinterParser = 1;
   let useDefaultAttributePrinterParser = 1;
   let hasConstantMaterializer = 1;
+  let hasCanonicalizer = 1;
   let dependentDialects = [
     "::mlir::arith::ArithDialect",
     "::mlir::iree_compiler::IREE::Util::UtilDialect",

@@ -55,6 +55,7 @@ def Loom_TileBroadcastAlignAttr : Loom_I32EnumAttr<
 include "iree/compiler/Dialect/Loom/IR/Tile/AllocaOp.td"
 include "iree/compiler/Dialect/Loom/IR/Tile/BroadcastOp.td"
 include "iree/compiler/Dialect/Loom/IR/Tile/ConstantOp.td"
+include "iree/compiler/Dialect/Loom/IR/Tile/CopyOp.td"
 include "iree/compiler/Dialect/Loom/IR/Tile/DimOp.td"
 include "iree/compiler/Dialect/Loom/IR/Tile/ElementwiseOp.td"
 include "iree/compiler/Dialect/Loom/IR/Tile/FillOp.td"

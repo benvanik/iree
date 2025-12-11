@@ -7,6 +7,7 @@
 #include "iree/compiler/Dialect/Loom/IR/LoomDialect.h"
 
 #include "iree/compiler/Dialect/Loom/IR/LoomAttrs.h"
+#include "iree/compiler/Dialect/Loom/IR/LoomOpPatterns.h"
 #include "iree/compiler/Dialect/Loom/IR/LoomTypes.h"
 #include "iree/compiler/Dialect/Loom/IR/Tensor/TensorOps.h"
 #include "iree/compiler/Dialect/Loom/IR/Test/TestOps.h"
@@ -16,6 +17,7 @@
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/PatternMatch.h"
 
 //===----------------------------------------------------------------------===//
 // `loom` dialect
@@ -42,6 +44,13 @@ Operation* LoomDialect::materializeConstant(OpBuilder& builder, Attribute value,
     return op;
   }
   return nullptr;
+}
+
+void LoomDialect::getCanonicalizationPatterns(
+    RewritePatternSet& results) const {
+  // Add interface-based patterns that apply to all ops implementing
+  // CopySubrangeOpInterface (slice/update ops).
+  populateCopySubrangeOpInterfacePatterns(results);
 }
 
 }  // namespace mlir::iree_compiler::IREE::Loom

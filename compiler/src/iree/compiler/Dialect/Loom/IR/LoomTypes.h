@@ -12,7 +12,9 @@
 #include "mlir/Interfaces/ViewLikeInterface.h"
 
 // clang-format off: must be included after all LLVM/MLIR headers
-#include "iree/compiler/Dialect/Loom/IR/LoomInterfaces.h.inc"
+// Attribute interfaces (EncodingAttrInterface) must be included before types.
+#define GET_ATTR_INTERFACE_CLASSES
+#include "iree/compiler/Dialect/Loom/IR/LoomAttrInterfaces.h.inc"
 #define GET_TYPEDEF_CLASSES
 #include "iree/compiler/Dialect/Loom/IR/LoomTypes.h.inc"
 // clang-format on

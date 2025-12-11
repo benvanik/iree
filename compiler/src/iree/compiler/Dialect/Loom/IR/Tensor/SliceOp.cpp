@@ -75,6 +75,56 @@ SmallVector<OpFoldResult> TensorSliceOp::getMixedStrides() {
 }
 
 //===----------------------------------------------------------------------===//
+// CopySubrangeOpInterface
+//===----------------------------------------------------------------------===//
+
+Value TensorSliceOp::getSubrangeSource() { return getSource(); }
+
+ValueRange TensorSliceOp::getSourceDynamicDims() { return getSourceDims(); }
+
+ArrayRef<int64_t> TensorSliceOp::getSourceShape() {
+  return getSourceType().getShape();
+}
+
+SmallVector<OpFoldResult> TensorSliceOp::getSourceMixedOffsets() {
+  return getMixedOffsets();
+}
+
+SmallVector<OpFoldResult> TensorSliceOp::getSourceMixedSizes() {
+  return getMixedSizes();
+}
+
+ArrayRef<int64_t> TensorSliceOp::getTargetShape() {
+  // For slice ops, target shape is the result shape (where data is written).
+  return getResultType().getShape();
+}
+
+SmallVector<OpFoldResult> TensorSliceOp::getTargetMixedOffsets() {
+  // Slice writes to result at offset [0,0,...].
+  SmallVector<OpFoldResult> offsets;
+  Builder b(getContext());
+  for (int64_t i = 0; i < getRank(); ++i) {
+    offsets.push_back(b.getIndexAttr(0));
+  }
+  return offsets;
+}
+
+SmallVector<OpFoldResult> TensorSliceOp::getTargetMixedSizes() {
+  return getMixedSizes();
+}
+
+Value TensorSliceOp::getSubrangeTarget() {
+  // Slice ops have no target operand - data is read from source, written to
+  // result.
+  return Value();
+}
+
+ValueRange TensorSliceOp::getTargetDynamicDims() {
+  // No target operand for slice ops.
+  return ValueRange();
+}
+
+//===----------------------------------------------------------------------===//
 // Canonicalization
 //===----------------------------------------------------------------------===//
 
@@ -113,59 +163,6 @@ struct FoldTensorSliceConstantOffsets : public OpRewritePattern<TensorSliceOp> {
         op, op.getType(), op.getSource(), op.getSourceDims(), newDynamicOffsets,
         op.getResultDims(), rewriter.getDenseI64ArrayAttr(newStaticOffsets));
     return success();
-  }
-};
-
-// Fold slice of poison tensor to poison tile.
-// slice(poison) -> poison
-struct FoldTensorSliceOfPoison : public OpRewritePattern<TensorSliceOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TensorSliceOp op,
-                                PatternRewriter& rewriter) const override {
-    auto poisonOp = op.getSource().getDefiningOp<ub::PoisonOp>();
-    if (!poisonOp) {
-      return failure();
-    }
-
-    return replaceWithPoisonAndRemark(
-        rewriter, op, "slice source tensor is poison", poisonOp);
-  }
-};
-
-// Fold out-of-bounds slice to poison (UB).
-// slice %tensor[offset] where offset + size > tensor_dim -> poison
-struct FoldTensorSliceOutOfBounds : public OpRewritePattern<TensorSliceOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TensorSliceOp op,
-                                PatternRewriter& rewriter) const override {
-    SmallVector<OpFoldResult> offsets = op.getMixedOffsets();
-    SmallVector<OpFoldResult> sizes = op.getMixedSizes();
-    TensorType sourceType = op.getSourceType();
-    ArrayRef<int64_t> sourceDims = sourceType.getShape();
-
-    // Check each dimension for out-of-bounds.
-    for (size_t i = 0; i < offsets.size(); ++i) {
-      auto offsetAttr = dyn_cast<Attribute>(offsets[i]);
-      auto sizeAttr = dyn_cast<Attribute>(sizes[i]);
-      int64_t sourceDim = sourceDims[i];
-
-      // Need static values to prove out-of-bounds.
-      if (!offsetAttr || !sizeAttr || ShapedType::isDynamic(sourceDim)) {
-        continue;
-      }
-
-      int64_t offset = cast<IntegerAttr>(offsetAttr).getInt();
-      int64_t size = cast<IntegerAttr>(sizeAttr).getInt();
-
-      if (offset + size > sourceDim) {
-        return replaceWithPoisonAndRemark(
-            rewriter, op, "slice extends beyond tensor bounds (UB)");
-      }
-    }
-
-    return failure();
   }
 };
 
@@ -241,8 +238,7 @@ struct FoldTensorSliceOfUpdateDisjoint
 
 void TensorSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                                 MLIRContext* context) {
-  results.add<FoldTensorSliceConstantOffsets, FoldTensorSliceOfPoison,
-              FoldTensorSliceOutOfBounds, FoldTensorSliceOfUpdate,
+  results.add<FoldTensorSliceConstantOffsets, FoldTensorSliceOfUpdate,
               FoldTensorSliceOfUpdateDisjoint>(context);
 }
 

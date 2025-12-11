@@ -76,6 +76,56 @@ SmallVector<OpFoldResult> TileSliceOp::getMixedStrides() {
 }
 
 //===----------------------------------------------------------------------===//
+// CopySubrangeOpInterface
+//===----------------------------------------------------------------------===//
+
+Value TileSliceOp::getSubrangeSource() { return getSource(); }
+
+ValueRange TileSliceOp::getSourceDynamicDims() { return getSourceDims(); }
+
+ArrayRef<int64_t> TileSliceOp::getSourceShape() {
+  return getSourceType().getShape();
+}
+
+SmallVector<OpFoldResult> TileSliceOp::getSourceMixedOffsets() {
+  return getMixedOffsets();
+}
+
+SmallVector<OpFoldResult> TileSliceOp::getSourceMixedSizes() {
+  return getMixedSizes();
+}
+
+ArrayRef<int64_t> TileSliceOp::getTargetShape() {
+  // For slice ops, target shape is the result shape (where data is written).
+  return getResultType().getShape();
+}
+
+SmallVector<OpFoldResult> TileSliceOp::getTargetMixedOffsets() {
+  // Slice writes to result at offset [0,0,...].
+  SmallVector<OpFoldResult> offsets;
+  Builder b(getContext());
+  for (int64_t i = 0; i < getRank(); ++i) {
+    offsets.push_back(b.getIndexAttr(0));
+  }
+  return offsets;
+}
+
+SmallVector<OpFoldResult> TileSliceOp::getTargetMixedSizes() {
+  return getMixedSizes();
+}
+
+Value TileSliceOp::getSubrangeTarget() {
+  // Slice ops have no target operand - data is read from source, written to
+  // result.
+  return Value();
+}
+
+ValueRange TileSliceOp::getTargetDynamicDims() {
+  // No target operand for slice ops.
+  return ValueRange();
+}
+
+//===----------------------------------------------------------------------===//
 // Canonicalization
 //===----------------------------------------------------------------------===//
 
@@ -139,112 +189,6 @@ struct ComposeSliceOfSlice : public OpRewritePattern<TileSliceOp> {
         dynamicOffsets, op.getResultDims(),
         rewriter.getDenseI64ArrayAttr(staticOffsets));
     return success();
-  }
-};
-
-// Fold slice of poison to poison.
-// slice(ub.poison) -> ub.poison
-struct FoldSliceOfPoison : public OpRewritePattern<TileSliceOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TileSliceOp op,
-                                PatternRewriter& rewriter) const override {
-    auto sourcePoison = op.getSource().getDefiningOp<ub::PoisonOp>();
-    if (!sourcePoison) {
-      return failure();
-    }
-
-    return replaceWithPoisonAndRemark(rewriter, op, "slice source is poison",
-                                      sourcePoison);
-  }
-};
-
-// Fold impossible slices to ub.poison.
-// A slice with same shape as source but provably non-zero offset is UB.
-struct FoldImpossibleSliceToPoison : public OpRewritePattern<TileSliceOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TileSliceOp op,
-                                PatternRewriter& rewriter) const override {
-    TileType sourceType = op.getSourceType();
-    TileType resultType = op.getResultType();
-
-    // Only applies when shapes are the same STATIC shape.
-    // For dynamic shapes, we can't prove the dimensions are equal.
-    if (sourceType.getShape() != resultType.getShape()) {
-      return failure();
-    }
-
-    // Must be fully static to prove UB.
-    if (!sourceType.hasStaticShape()) {
-      return failure();
-    }
-
-    // Check if any offset is provably non-zero.
-    SmallVector<OpFoldResult> offsets = op.getMixedOffsets();
-    bool hasNonZeroOffset = false;
-    for (OpFoldResult foldResult : offsets) {
-      if (auto attr = dyn_cast<Attribute>(foldResult)) {
-        auto intAttr = dyn_cast<IntegerAttr>(attr);
-        if (intAttr && intAttr.getInt() != 0) {
-          hasNonZeroOffset = true;
-          break;
-        }
-      }
-      // Dynamic offset - can't prove it's non-zero.
-    }
-
-    if (!hasNonZeroOffset) {
-      return failure();
-    }
-
-    return replaceWithPoisonAndRemark(
-        rewriter, op,
-        "same-shape slice with non-zero offset is undefined behavior");
-  }
-};
-
-// Fold out-of-bounds slices to ub.poison.
-// When offset + result_size > source_size (statically provable), it's UB.
-struct FoldOutOfBoundsSliceToPoison : public OpRewritePattern<TileSliceOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TileSliceOp op,
-                                PatternRewriter& rewriter) const override {
-    TileType sourceType = op.getSourceType();
-    TileType resultType = op.getResultType();
-
-    ArrayRef<int64_t> sourceShape = sourceType.getShape();
-    ArrayRef<int64_t> resultShape = resultType.getShape();
-    SmallVector<OpFoldResult> offsets = op.getMixedOffsets();
-
-    // Check each dimension for out-of-bounds access.
-    for (size_t i = 0; i < sourceShape.size(); ++i) {
-      int64_t sourceDim = sourceShape[i];
-      int64_t resultDim = resultShape[i];
-
-      // Need static dimensions to prove OOB.
-      if (ShapedType::isDynamic(sourceDim) ||
-          ShapedType::isDynamic(resultDim)) {
-        continue;
-      }
-
-      // Check if offset is static.
-      auto offsetAttr = dyn_cast<Attribute>(offsets[i]);
-      if (!offsetAttr) {
-        continue;
-      }
-
-      int64_t offset = cast<IntegerAttr>(offsetAttr).getInt();
-
-      // Check: offset + resultDim > sourceDim
-      if (offset + resultDim > sourceDim) {
-        return replaceWithPoisonAndRemark(rewriter, op,
-                                          "slice extends beyond source bounds");
-      }
-    }
-
-    return failure();
   }
 };
 
@@ -612,11 +556,10 @@ struct ComposeTileSliceOfTensorSlice : public OpRewritePattern<TileSliceOp> {
 
 void TileSliceOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                               MLIRContext* context) {
-  results.add<ComposeSliceOfSlice, FoldSliceOfPoison, FoldSliceOfFill,
-              FoldImpossibleSliceToPoison, FoldOutOfBoundsSliceToPoison,
-              FoldTileSliceConstantOffsets, FoldSliceOfUpdate,
-              FoldSliceOfUpdateDisjoint, FoldSliceOfBroadcast,
-              FoldSliceOfElementwise, ComposeTileSliceOfTensorSlice>(context);
+  results
+      .add<ComposeSliceOfSlice, FoldSliceOfFill, FoldTileSliceConstantOffsets,
+           FoldSliceOfUpdate, FoldSliceOfUpdateDisjoint, FoldSliceOfBroadcast,
+           FoldSliceOfElementwise, ComposeTileSliceOfTensorSlice>(context);
 }
 
 //===----------------------------------------------------------------------===//

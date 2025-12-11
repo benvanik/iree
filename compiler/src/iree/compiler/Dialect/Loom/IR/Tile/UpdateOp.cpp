@@ -93,116 +93,55 @@ SmallVector<OpFoldResult> TileUpdateOp::getMixedStrides() {
 }
 
 //===----------------------------------------------------------------------===//
+// CopySubrangeOpInterface
+//===----------------------------------------------------------------------===//
+
+Value TileUpdateOp::getSubrangeSource() {
+  // For update ops, the "source" being copied is the update tile.
+  return getUpdate();
+}
+
+ValueRange TileUpdateOp::getSourceDynamicDims() { return getUpdateDims(); }
+
+ArrayRef<int64_t> TileUpdateOp::getSourceShape() {
+  return getUpdateType().getShape();
+}
+
+SmallVector<OpFoldResult> TileUpdateOp::getSourceMixedOffsets() {
+  // We read the entire update tile (offsets are all zero).
+  SmallVector<OpFoldResult> offsets;
+  Builder b(getContext());
+  for (int64_t i = 0; i < getRank(); ++i) {
+    offsets.push_back(b.getIndexAttr(0));
+  }
+  return offsets;
+}
+
+SmallVector<OpFoldResult> TileUpdateOp::getSourceMixedSizes() {
+  return getMixedSizes();
+}
+
+Value TileUpdateOp::getSubrangeTarget() { return getTarget(); }
+
+ValueRange TileUpdateOp::getTargetDynamicDims() { return getTargetDims(); }
+
+ArrayRef<int64_t> TileUpdateOp::getTargetShape() {
+  return getTargetType().getShape();
+}
+
+SmallVector<OpFoldResult> TileUpdateOp::getTargetMixedOffsets() {
+  return getMixedOffsets();
+}
+
+SmallVector<OpFoldResult> TileUpdateOp::getTargetMixedSizes() {
+  return getMixedSizes();
+}
+
+//===----------------------------------------------------------------------===//
 // Canonicalization
 //===----------------------------------------------------------------------===//
 
 namespace {
-
-// Fold update with poison target to poison.
-// update(%sub, ub.poison) -> ub.poison
-struct FoldUpdateOfPoisonTarget : public OpRewritePattern<TileUpdateOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TileUpdateOp op,
-                                PatternRewriter& rewriter) const override {
-    auto targetPoison = op.getTarget().getDefiningOp<ub::PoisonOp>();
-    if (!targetPoison) {
-      return failure();
-    }
-
-    return replaceWithPoisonAndRemark(rewriter, op, "update target is poison",
-                                      targetPoison);
-  }
-};
-
-// Fold impossible updates to ub.poison.
-// An update with same shape as target but provably non-zero offset is UB.
-struct FoldImpossibleUpdateToPoison : public OpRewritePattern<TileUpdateOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TileUpdateOp op,
-                                PatternRewriter& rewriter) const override {
-    TileType updateType = op.getUpdateType();
-    TileType targetType = op.getTargetType();
-
-    // Only applies when shapes are the same STATIC shape.
-    // For dynamic shapes, we can't prove the dimensions are equal.
-    if (updateType.getShape() != targetType.getShape()) {
-      return failure();
-    }
-
-    // Must be fully static to prove UB.
-    if (!updateType.hasStaticShape()) {
-      return failure();
-    }
-
-    // Check if any offset is provably non-zero.
-    SmallVector<OpFoldResult> offsets = op.getMixedOffsets();
-    bool hasNonZeroOffset = false;
-    for (OpFoldResult foldResult : offsets) {
-      if (auto attr = dyn_cast<Attribute>(foldResult)) {
-        auto intAttr = dyn_cast<IntegerAttr>(attr);
-        if (intAttr && intAttr.getInt() != 0) {
-          hasNonZeroOffset = true;
-          break;
-        }
-      }
-      // Dynamic offset - can't prove it's non-zero.
-    }
-
-    if (!hasNonZeroOffset) {
-      return failure();
-    }
-
-    return replaceWithPoisonAndRemark(
-        rewriter, op,
-        "same-shape update with non-zero offset is undefined behavior");
-  }
-};
-
-// Fold out-of-bounds updates to ub.poison.
-// When offset + update_size > target_size (statically provable), it's UB.
-struct FoldOutOfBoundsUpdateToPoison : public OpRewritePattern<TileUpdateOp> {
-  using OpRewritePattern::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(TileUpdateOp op,
-                                PatternRewriter& rewriter) const override {
-    TileType targetType = op.getTargetType();
-    TileType updateType = op.getUpdateType();
-
-    ArrayRef<int64_t> targetShape = targetType.getShape();
-    ArrayRef<int64_t> updateShape = updateType.getShape();
-    SmallVector<OpFoldResult> offsets = op.getMixedOffsets();
-
-    // Check each dimension for out-of-bounds access.
-    for (size_t i = 0; i < targetShape.size(); ++i) {
-      int64_t targetDim = targetShape[i];
-      int64_t updateDim = updateShape[i];
-
-      // Need static dimensions to prove OOB.
-      if (ShapedType::isDynamic(targetDim) ||
-          ShapedType::isDynamic(updateDim)) {
-        continue;
-      }
-
-      // Check if offset is static.
-      auto offsetAttr = dyn_cast<Attribute>(offsets[i]);
-      if (!offsetAttr) {
-        continue;
-      }
-
-      int64_t offset = cast<IntegerAttr>(offsetAttr).getInt();
-
-      // Check: offset + updateDim > targetDim
-      if (offset + updateDim > targetDim) {
-        return replaceWithPoisonAndRemark(
-            rewriter, op, "update extends beyond target bounds");
-      }
-    }
-
-    return failure();
-  }
-};
 
 // Fold idempotent update: update(fill(v), fill(v)) -> fill(v) (keep target).
 // When updating a fill with a fill of the same value, the update is a no-op.
@@ -316,9 +255,8 @@ struct FoldUpdateOverUpdate : public OpRewritePattern<TileUpdateOp> {
 
 void TileUpdateOp::getCanonicalizationPatterns(RewritePatternSet& results,
                                                MLIRContext* context) {
-  results.add<FoldUpdateOfPoisonTarget, FoldImpossibleUpdateToPoison,
-              FoldOutOfBoundsUpdateToPoison, FoldIdempotentFillUpdate,
-              FoldTileUpdateConstantOffsets, FoldUpdateOverUpdate>(context);
+  results.add<FoldIdempotentFillUpdate, FoldTileUpdateConstantOffsets,
+              FoldUpdateOverUpdate>(context);
 }
 
 //===----------------------------------------------------------------------===//

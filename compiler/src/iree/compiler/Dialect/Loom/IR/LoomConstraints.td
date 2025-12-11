@@ -466,9 +466,80 @@ class Loom_TensorDimIndexInBounds<string sourceOp, string indexOp> :
 }
 
 //===----------------------------------------------------------------------===//
+// Generic Subrange Constraints
+//===----------------------------------------------------------------------===//
+// Generic constraints for subrange operations (slice, update, copy).
+// These use the new ERR_LOOM_SUBRANGE_* errors with operand name templating,
+// making them reusable across all subrange ops.
+
+// Verifies offset count matches tile rank.
+// Example: Loom_OffsetCountMatchesTileRank<"source", "static_source_offsets">
+class Loom_OffsetCountMatchesTileRank<string tile, string offsets> :
+    Loom_Constraint<"OffsetCountMatchesTileRank_" # !subst(".", "_", tile) #
+                    "_" # !subst(".", "_", offsets)> {
+  let error = ERR_LOOM_SUBRANGE_0001;
+
+  let verifyPredicate = [{
+    return static_cast<int64_t>($}] # offsets # [{.size()) ==
+           }] # Loom_TileRankOf<tile>.value # [{;
+  }];
+
+  let errorArgs = (binds
+    (arg "operandName", "StringRef", [{"}] # tile # [{"}]),
+    (arg "offsetCount", "unsigned", [{
+      static_cast<unsigned>($}] # offsets # [{.size())
+    }]),
+    (arg "rank", "int64_t", Loom_TileRankOf<tile>.value)
+  );
+}
+
+// Verifies size count matches tile rank.
+// Example: Loom_SizeCountMatchesTileRank<"source", "static_sizes">
+class Loom_SizeCountMatchesTileRank<string tile, string sizes> :
+    Loom_Constraint<"SizeCountMatchesTileRank_" # !subst(".", "_", tile) #
+                    "_" # !subst(".", "_", sizes)> {
+  let error = ERR_LOOM_SUBRANGE_0003;
+
+  let verifyPredicate = [{
+    return static_cast<int64_t>($}] # sizes # [{.size()) ==
+           }] # Loom_TileRankOf<tile>.value # [{;
+  }];
+
+  let errorArgs = (binds
+    (arg "operandName", "StringRef", [{"}] # tile # [{"}]),
+    (arg "sizeCount", "unsigned", [{
+      static_cast<unsigned>($}] # sizes # [{.size())
+    }]),
+    (arg "rank", "int64_t", Loom_TileRankOf<tile>.value)
+  );
+}
+
+// Verifies two tile operands have the same rank.
+// Example: Loom_TileRanksMatch<"source", "target">
+class Loom_TileRanksMatch<string tile1, string tile2> :
+    Loom_Constraint<"TileRanksMatch_" # !subst(".", "_", tile1) #
+                    "_" # !subst(".", "_", tile2)> {
+  let error = ERR_LOOM_SUBRANGE_0002;
+
+  let verifyPredicate = [{
+    return }] # Loom_TileRankOf<tile1>.value # [{ ==
+           }] # Loom_TileRankOf<tile2>.value # [{;
+  }];
+
+  let errorArgs = (binds
+    (arg "operand1Name", "StringRef", [{"}] # tile1 # [{"}]),
+    (arg "rank1", "int64_t", Loom_TileRankOf<tile1>.value),
+    (arg "operand2Name", "StringRef", [{"}] # tile2 # [{"}]),
+    (arg "rank2", "int64_t", Loom_TileRankOf<tile2>.value)
+  );
+}
+
+//===----------------------------------------------------------------------===//
 // Slice Operation Constraints
 //===----------------------------------------------------------------------===//
 // For loom.tensor.slice (tensor->tile) and loom.tile.slice (tile->tile).
+// NOTE: These use the older ERR_LOOM_SLICE_* errors. For new ops, prefer
+// the generic Loom_OffsetCountMatchesTileRank and Loom_TileRanksMatch.
 
 // Verifies offset count matches source tensor rank.
 // Example: Loom_TensorSliceOffsetCountMatchesRank<"source", "static_offsets">

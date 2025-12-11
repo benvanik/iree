@@ -9,6 +9,7 @@
 
 #include "iree/compiler/Dialect/Loom/IR/LoomConstraints.h"
 #include "iree/compiler/Dialect/Loom/IR/LoomDialect.h"
+#include "iree/compiler/Dialect/Loom/IR/LoomInterfaces.h"
 #include "iree/compiler/Dialect/Loom/IR/LoomTypes.h"
 #include "iree/compiler/Dialect/Util/IR/UtilTypes.h"
 #include "mlir/IR/BuiltinTypes.h"
