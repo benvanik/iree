@@ -78,16 +78,53 @@ static inline iree_vm_registers_t iree_vm_bytecode_get_register_storage(
 }
 
 // Releases any remaining refs held in the frame storage.
+// On success paths (result_code == OK), the compiler guarantees all refs are
+// explicitly released via MOVE bits and vm.discard.refs, so we can skip this.
+// On error/unwind paths (result_code != OK), we need to release remaining refs.
+// The result_code is initialized to UNKNOWN and only set to OK on successful
+// return - frames that error or get unwound retain the non-OK value.
 static void iree_vm_bytecode_stack_frame_cleanup(iree_vm_stack_frame_t* frame) {
-  // TODO(benvanik): allow the VM to elide this when it's known that there are
-  // no more live registers.
   const iree_vm_bytecode_frame_storage_t* stack_storage =
       (iree_vm_bytecode_frame_storage_t*)iree_vm_stack_frame_storage(frame);
+
+  // TODO(benvanik): enable when compiler produces proper programs.
+  // For now we always take the error path to clean things up.
+#if 0
+  // On success paths (result_code == OK), the compiler guarantees all refs
+  // are explicitly released. Skip the cleanup loop.
+  if (stack_storage->result_code == IREE_STATUS_OK) {
+#if defined(IREE_VM_REF_DEBUG_CLEAN)
+    // Verify compiler guarantee: all refs should be NULL on success path.
+    iree_vm_ref_t* refs = (iree_vm_ref_t*)((uintptr_t)stack_storage +
+                                           stack_storage->ref_register_offset);
+    for (uint16_t i = 0; i < stack_storage->ref_register_count; ++i) {
+      if (refs[i].ptr) {
+        iree_string_view_t func_name = iree_vm_function_name(&frame->function);
+        fprintf(stderr, "DEBUG: ref r%d not zeroed in %.*s (ptr=%p, type=%d)\n",
+                i, (int)func_name.size, func_name.data, refs[i].ptr,
+                (int)refs[i].type);
+        fflush(stderr);
+      }
+      IREE_ASSERT(!refs[i].ptr,
+                  "ref register %d not zeroed on success path - "
+                  "compiler bug in ref lifetime management",
+                  i);
+    }
+#endif  // IREE_VM_REF_DEBUG_CLEAN
+    return;
+  }
+#endif  // 0
+
+  // Error/unwind path: release all remaining refs. This handles:
+  // - Frames that explicitly errored (vm.fail, import failures)
+  // - Frames that were unwound due to callee errors (result_code == UNKNOWN)
   iree_vm_ref_t* refs = (iree_vm_ref_t*)((uintptr_t)stack_storage +
                                          stack_storage->ref_register_offset);
   for (uint16_t i = 0; i < stack_storage->ref_register_count; ++i) {
     iree_vm_ref_t* ref = &refs[i];
-    if (ref->ptr) iree_vm_ref_release(ref);
+    if (ref->ptr) {
+      iree_vm_ref_release(ref);
+    }
   }
 }
 
@@ -405,7 +442,8 @@ static void iree_vm_bytecode_populate_import_cconv_arguments(
       } break;
       case IREE_VM_CCONV_TYPE_REF: {
         uint16_t src_reg = src_reg_list->registers[reg_i++];
-        iree_vm_ref_assign(
+        iree_vm_ref_retain_or_move(
+            src_reg & IREE_REF_REGISTER_MOVE_BIT,
             &caller_registers.ref[src_reg & IREE_REF_REGISTER_MASK],
             (iree_vm_ref_t*)p);  // safe unaligned
         p += sizeof(iree_vm_ref_t);
@@ -449,7 +487,8 @@ static void iree_vm_bytecode_populate_import_cconv_arguments(
               } break;
               case IREE_VM_CCONV_TYPE_REF: {
                 uint16_t src_reg = src_reg_list->registers[reg_i++];
-                iree_vm_ref_assign(
+                iree_vm_ref_retain_or_move(
+                    src_reg & IREE_REF_REGISTER_MOVE_BIT,
                     &caller_registers.ref[src_reg & IREE_REF_REGISTER_MASK],
                     (iree_vm_ref_t*)p);  // safe unaligned
                 p += sizeof(iree_vm_ref_t);
@@ -462,9 +501,76 @@ static void iree_vm_bytecode_populate_import_cconv_arguments(
   }
 }
 
+// Releases all refs in an import call argument buffer.
+// This must be called after the import returns to clean up retained refs.
+static void iree_vm_bytecode_release_import_cconv_arguments(
+    iree_string_view_t cconv_arguments,
+    const iree_vm_register_list_t* IREE_RESTRICT segment_size_list,
+    iree_byte_span_t storage) {
+  uint8_t* IREE_RESTRICT p = storage.data;
+  for (iree_host_size_t i = 0, seg_i = 0; i < cconv_arguments.size;
+       ++i, ++seg_i) {
+    switch (cconv_arguments.data[i]) {
+      case IREE_VM_CCONV_TYPE_VOID:
+        break;
+      case IREE_VM_CCONV_TYPE_I32:
+      case IREE_VM_CCONV_TYPE_F32:
+        p += sizeof(int32_t);
+        break;
+      case IREE_VM_CCONV_TYPE_I64:
+      case IREE_VM_CCONV_TYPE_F64:
+        p += sizeof(int64_t);
+        break;
+      case IREE_VM_CCONV_TYPE_REF:
+        iree_vm_ref_release((iree_vm_ref_t*)p);
+        p += sizeof(iree_vm_ref_t);
+        break;
+      case IREE_VM_CCONV_TYPE_SPAN_START: {
+        IREE_ASSERT(segment_size_list);
+        int32_t span_count = segment_size_list->registers[seg_i];
+        p += sizeof(int32_t);
+        if (!span_count) {
+          do {
+            ++i;
+          } while (i < cconv_arguments.size &&
+                   cconv_arguments.data[i] != IREE_VM_CCONV_TYPE_SPAN_END);
+          continue;
+        }
+        iree_host_size_t span_start_i = i + 1;
+        for (int32_t j = 0; j < span_count; ++j) {
+          for (i = span_start_i;
+               i < cconv_arguments.size &&
+               cconv_arguments.data[i] != IREE_VM_CCONV_TYPE_SPAN_END;
+               ++i) {
+            switch (cconv_arguments.data[i]) {
+              case IREE_VM_CCONV_TYPE_VOID:
+                break;
+              case IREE_VM_CCONV_TYPE_I32:
+              case IREE_VM_CCONV_TYPE_F32:
+                p += sizeof(int32_t);
+                break;
+              case IREE_VM_CCONV_TYPE_I64:
+              case IREE_VM_CCONV_TYPE_F64:
+                p += sizeof(int64_t);
+                break;
+              case IREE_VM_CCONV_TYPE_REF:
+                iree_vm_ref_release((iree_vm_ref_t*)p);
+                p += sizeof(iree_vm_ref_t);
+                break;
+            }
+          }
+        }
+      } break;
+    }
+  }
+}
+
 // Issues a populated import call and marshals the results into |dst_reg_list|.
+// After the call completes, releases any refs in the argument buffer.
 static iree_status_t iree_vm_bytecode_issue_import_call(
     iree_vm_stack_t* stack, const iree_vm_function_call_t call,
+    iree_string_view_t cconv_arguments,
+    const iree_vm_register_list_t* IREE_RESTRICT segment_size_list,
     iree_string_view_t cconv_results,
     const iree_vm_register_list_t* IREE_RESTRICT dst_reg_list,
     iree_vm_stack_frame_t* IREE_RESTRICT* out_caller_frame,
@@ -472,6 +578,12 @@ static iree_status_t iree_vm_bytecode_issue_import_call(
   // Call external function.
   iree_status_t call_status =
       call.function.module->begin_call(call.function.module->self, stack, call);
+
+  // Release refs in argument buffer regardless of call status.
+  // The import borrows these refs during execution but we own them.
+  iree_vm_bytecode_release_import_cconv_arguments(
+      cconv_arguments, segment_size_list, call.arguments);
+
   if (iree_status_is_deferred(call_status)) {
     if (!iree_byte_span_is_empty(call.results)) {
       iree_status_ignore(call_status);
@@ -587,9 +699,9 @@ static iree_status_t iree_vm_bytecode_call_import(
   call.results.data_length = import->result_buffer_size;
   call.results.data = iree_alloca(call.results.data_length);
   memset(call.results.data, 0, call.results.data_length);
-  return iree_vm_bytecode_issue_import_call(stack, call, import->results,
-                                            dst_reg_list, out_caller_frame,
-                                            out_caller_registers);
+  return iree_vm_bytecode_issue_import_call(
+      stack, call, import->arguments, /*segment_size_list=*/NULL,
+      import->results, dst_reg_list, out_caller_frame, out_caller_registers);
 }
 
 // Calls a variadic imported function from another module.
@@ -628,9 +740,9 @@ static iree_status_t iree_vm_bytecode_call_import_variadic(
   call.results.data_length = import->result_buffer_size;
   call.results.data = iree_alloca(call.results.data_length);
   memset(call.results.data, 0, call.results.data_length);
-  return iree_vm_bytecode_issue_import_call(stack, call, import->results,
-                                            dst_reg_list, out_caller_frame,
-                                            out_caller_registers);
+  return iree_vm_bytecode_issue_import_call(
+      stack, call, import->arguments, segment_size_list, import->results,
+      dst_reg_list, out_caller_frame, out_caller_registers);
 }
 
 //===----------------------------------------------------------------------===//
@@ -816,7 +928,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       IREE_ASSERT(global < module_state->global_ref_count);
       const iree_vm_type_def_t type_def = VM_DecTypeOf("value");
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("value", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("value", &result_is_move);
       iree_vm_ref_t* global_ref = &module_state->global_ref_table[global];
       IREE_RETURN_IF_ERROR(iree_vm_ref_retain_or_move_checked(
           result_is_move, global_ref, iree_vm_type_def_as_ref(type_def),
@@ -828,7 +940,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       IREE_ASSERT(global < module_state->global_ref_count);
       const iree_vm_type_def_t type_def = VM_DecTypeOf("value");
       bool value_is_move;
-      iree_vm_ref_t* value = VM_DecOperandRegRef("value", &value_is_move);
+      iree_vm_ref_t* value = VM_DecOperandRegRefMove("value", &value_is_move);
       iree_vm_ref_t* global_ref = &module_state->global_ref_table[global];
       IREE_RETURN_IF_ERROR(iree_vm_ref_retain_or_move_checked(
           value_is_move, value, iree_vm_type_def_as_ref(type_def), global_ref));
@@ -844,7 +956,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       }
       const iree_vm_type_def_t type_def = VM_DecTypeOf("value");
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("value", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("value", &result_is_move);
       iree_vm_ref_t* global_ref = &module_state->global_ref_table[global];
       IREE_RETURN_IF_ERROR(iree_vm_ref_retain_or_move_checked(
           result_is_move, global_ref, iree_vm_type_def_as_ref(type_def),
@@ -861,7 +973,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       }
       const iree_vm_type_def_t type_def = VM_DecTypeOf("value");
       bool value_is_move;
-      iree_vm_ref_t* value = VM_DecOperandRegRef("value", &value_is_move);
+      iree_vm_ref_t* value = VM_DecOperandRegRefMove("value", &value_is_move);
       iree_vm_ref_t* global_ref = &module_state->global_ref_table[global];
       IREE_RETURN_IF_ERROR(iree_vm_ref_retain_or_move_checked(
           value_is_move, value, iree_vm_type_def_as_ref(type_def), global_ref));
@@ -895,7 +1007,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
 
     DISPATCH_OP(CORE, ConstRefZero, {
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("result", &result_is_move);
       iree_vm_ref_release(result);
     });
 
@@ -903,7 +1015,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       uint32_t rodata_ordinal = VM_DecRodataAttr("rodata");
       IREE_ASSERT(rodata_ordinal < module->rodata_ref_count);
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("value", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("value", &result_is_move);
       IREE_RETURN_IF_ERROR(
           iree_vm_ref_wrap_retain(&module->rodata_ref_table[rodata_ordinal],
                                   iree_vm_buffer_type(), result));
@@ -917,7 +1029,8 @@ static iree_status_t iree_vm_bytecode_dispatch(
       iree_host_size_t length = VM_DecOperandRegI64HostSize("length");
       iree_host_size_t alignment = VM_DecOperandRegI32("alignment");
       bool result_is_move;
-      iree_vm_ref_t* result_ref = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result_ref =
+          VM_DecResultRegRefMove("result", &result_is_move);
       iree_vm_buffer_t* buffer = NULL;
       IREE_RETURN_IF_ERROR(iree_vm_buffer_create(
           IREE_VM_BUFFER_ACCESS_MUTABLE | IREE_VM_BUFFER_ACCESS_ORIGIN_GUEST,
@@ -927,9 +1040,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, BufferClone, {
-      bool source_is_move;
-      iree_vm_ref_t* source_ref =
-          VM_DecOperandRegRef("source", &source_is_move);
+      iree_vm_ref_t* source_ref = VM_DecOperandRegRef("source");
       iree_vm_buffer_t* source = iree_vm_buffer_deref(*source_ref);
       if (IREE_UNLIKELY(!source)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "source is null");
@@ -938,7 +1049,8 @@ static iree_status_t iree_vm_bytecode_dispatch(
       iree_host_size_t length = VM_DecOperandRegI64HostSize("length");
       iree_host_size_t alignment = VM_DecOperandRegI32("alignment");
       bool result_is_move;
-      iree_vm_ref_t* result_ref = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result_ref =
+          VM_DecResultRegRefMove("result", &result_is_move);
       iree_vm_buffer_t* result = NULL;
       IREE_RETURN_IF_ERROR(iree_vm_buffer_clone(
           IREE_VM_BUFFER_ACCESS_MUTABLE | IREE_VM_BUFFER_ACCESS_ORIGIN_GUEST,
@@ -948,9 +1060,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, BufferLength, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "buffer is null");
@@ -960,9 +1070,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, BufferCopy, {
-      bool source_buffer_is_move;
-      iree_vm_ref_t* source_buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &source_buffer_is_move);
+      iree_vm_ref_t* source_buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* source_buffer =
           iree_vm_buffer_deref(*source_buffer_ref);
       if (IREE_UNLIKELY(!source_buffer)) {
@@ -971,9 +1079,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       }
       iree_host_size_t source_offset =
           VM_DecOperandRegI64HostSize("source_offset");
-      bool target_buffer_is_move;
-      iree_vm_ref_t* target_buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &target_buffer_is_move);
+      iree_vm_ref_t* target_buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* target_buffer =
           iree_vm_buffer_deref(*target_buffer_ref);
       if (IREE_UNLIKELY(!target_buffer)) {
@@ -988,18 +1094,14 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, BufferCompare, {
-      bool lhs_buffer_is_move;
-      iree_vm_ref_t* lhs_buffer_ref =
-          VM_DecOperandRegRef("lhs_buffer", &lhs_buffer_is_move);
+      iree_vm_ref_t* lhs_buffer_ref = VM_DecOperandRegRef("lhs_buffer");
       iree_vm_buffer_t* lhs_buffer = iree_vm_buffer_deref(*lhs_buffer_ref);
       if (IREE_UNLIKELY(!lhs_buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "lhs_buffer is null");
       }
       iree_host_size_t lhs_offset = VM_DecOperandRegI64HostSize("lhs_offset");
-      bool rhs_buffer_is_move;
-      iree_vm_ref_t* rhs_buffer_ref =
-          VM_DecOperandRegRef("rhs_buffer", &rhs_buffer_is_move);
+      iree_vm_ref_t* rhs_buffer_ref = VM_DecOperandRegRef("rhs_buffer");
       iree_vm_buffer_t* rhs_buffer = iree_vm_buffer_deref(*rhs_buffer_ref);
       if (IREE_UNLIKELY(!rhs_buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1017,9 +1119,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     // gotcha is that on big-endian machines we'd have to flip around the bytes.
     // See VMOpcodesCore.td for more information on the encoding.
     DISPATCH_OP(CORE, BufferFillI8, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "buffer is null");
@@ -1030,9 +1130,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_fill_i8_inline(buffer, offset, length, value);
     });
     DISPATCH_OP(CORE, BufferFillI16, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "buffer is null");
@@ -1043,9 +1141,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_fill_i16_inline(buffer, offset, length, value);
     });
     DISPATCH_OP(CORE, BufferFillI32, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "buffer is null");
@@ -1056,9 +1152,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_fill_i32_inline(buffer, offset, length, value);
     });
     DISPATCH_OP(CORE, BufferFillI64, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "buffer is null");
@@ -1074,9 +1168,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     // can be packed into a single handler to reduce code-size.
     // See VMOpcodesCore.td for more information on the encoding.
     DISPATCH_OP(CORE, BufferLoadI8U, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1087,9 +1179,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_load_i8u_inline(buffer, offset, result);
     });
     DISPATCH_OP(CORE, BufferLoadI8S, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1100,9 +1190,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_load_i8s_inline(buffer, offset, result);
     });
     DISPATCH_OP(CORE, BufferLoadI16U, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1113,9 +1201,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_load_i16u_inline(buffer, offset, result);
     });
     DISPATCH_OP(CORE, BufferLoadI16S, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1126,9 +1212,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_load_i16s_inline(buffer, offset, result);
     });
     DISPATCH_OP(CORE, BufferLoadI32, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1139,9 +1223,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_load_i32_inline(buffer, offset, result);
     });
     DISPATCH_OP(CORE, BufferLoadI64, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1156,9 +1238,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     // same body - they only vary on the length.
     // See VMOpcodesCore.td for more information on the encoding.
     DISPATCH_OP(CORE, BufferStoreI8, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1169,9 +1249,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_store_i8_inline(buffer, offset, value);
     });
     DISPATCH_OP(CORE, BufferStoreI16, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1182,9 +1260,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_store_i16_inline(buffer, offset, value);
     });
     DISPATCH_OP(CORE, BufferStoreI32, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1195,9 +1271,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       vm_buffer_store_i32_inline(buffer, offset, value);
     });
     DISPATCH_OP(CORE, BufferStoreI64, {
-      bool buffer_is_move;
-      iree_vm_ref_t* buffer_ref =
-          VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+      iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
       iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
       if (IREE_UNLIKELY(!buffer)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1209,9 +1283,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, BufferHash, {
-      bool source_buffer_is_move;
-      iree_vm_ref_t* source_buffer_ref =
-          VM_DecOperandRegRef("source_buffer", &source_buffer_is_move);
+      iree_vm_ref_t* source_buffer_ref = VM_DecOperandRegRef("source_buffer");
       iree_vm_buffer_t* source_buffer =
           iree_vm_buffer_deref(*source_buffer_ref);
       if (IREE_UNLIKELY(!source_buffer)) {
@@ -1234,7 +1306,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       const iree_vm_type_def_t element_type_def = VM_DecTypeOf("element_type");
       uint32_t initial_capacity = VM_DecOperandRegI32("initial_capacity");
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("result", &result_is_move);
       iree_vm_list_t* list = NULL;
       IREE_RETURN_IF_ERROR(iree_vm_list_create(
           element_type_def, initial_capacity, module_state->allocator, &list));
@@ -1243,8 +1315,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListReserve, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1254,8 +1325,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListSize, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1265,8 +1335,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListResize, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1276,8 +1345,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListGetI32, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1291,8 +1359,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListSetI32, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1304,8 +1371,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListGetI64, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1319,8 +1385,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListSetI64, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1332,8 +1397,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListGetRef, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1341,7 +1405,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       uint32_t index = VM_DecOperandRegI32("index");
       const iree_vm_type_def_t type_def = VM_DecTypeOf("result");
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("result", &result_is_move);
       // TODO(benvanik): use result_is_move with a _retain_or_move.
       IREE_RETURN_IF_ERROR(iree_vm_list_get_ref_retain(list, index, result));
       if (result->type != IREE_VM_REF_TYPE_NULL &&
@@ -1354,15 +1418,15 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, ListSetRef, {
-      bool list_is_move;
-      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+      iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
       iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
       if (IREE_UNLIKELY(!list)) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
       }
       uint32_t index = VM_DecOperandRegI32("index");
       bool operand_is_move;
-      iree_vm_ref_t* operand = VM_DecOperandRegRef("value", &operand_is_move);
+      iree_vm_ref_t* operand =
+          VM_DecOperandRegRefMove("value", &operand_is_move);
       if (operand_is_move) {
         IREE_RETURN_IF_ERROR(iree_vm_list_set_ref_move(list, index, operand));
       } else {
@@ -1397,12 +1461,12 @@ static iree_status_t iree_vm_bytecode_dispatch(
       const iree_vm_type_def_t type_def = VM_DecTypeOf("true_value");
       bool true_value_is_move;
       iree_vm_ref_t* true_value =
-          VM_DecOperandRegRef("true_value", &true_value_is_move);
+          VM_DecOperandRegRefMove("true_value", &true_value_is_move);
       bool false_value_is_move;
       iree_vm_ref_t* false_value =
-          VM_DecOperandRegRef("false_value", &false_value_is_move);
+          VM_DecOperandRegRefMove("false_value", &false_value_is_move);
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("result", &result_is_move);
       if (condition) {
         // Select LHS.
         IREE_RETURN_IF_ERROR(iree_vm_ref_retain_or_move_checked(
@@ -1453,11 +1517,11 @@ static iree_status_t iree_vm_bytecode_dispatch(
       const iree_vm_type_def_t type_def = VM_DecTypeOf("result");
       bool default_is_move;
       iree_vm_ref_t* default_value =
-          VM_DecOperandRegRef("default_value", &default_is_move);
+          VM_DecOperandRegRefMove("default_value", &default_is_move);
       const iree_vm_register_list_t* value_reg_list =
           VM_DecVariadicOperands("values");
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("result", &result_is_move);
       if (index >= 0 && index < value_reg_list->size) {
         bool is_move =
             value_reg_list->registers[index] & IREE_REF_REGISTER_MOVE_BIT;
@@ -1545,10 +1609,11 @@ static iree_status_t iree_vm_bytecode_dispatch(
 
     DISPATCH_OP(CORE, CastAnyRef, {
       bool operand_is_move;
-      iree_vm_ref_t* operand = VM_DecOperandRegRef("operand", &operand_is_move);
+      iree_vm_ref_t* operand =
+          VM_DecOperandRegRefMove("operand", &operand_is_move);
       const iree_vm_type_def_t type_def = VM_DecTypeOf("result");
       bool result_is_move;
-      iree_vm_ref_t* result = VM_DecResultRegRef("result", &result_is_move);
+      iree_vm_ref_t* result = VM_DecResultRegRefMove("result", &result_is_move);
       IREE_RETURN_IF_ERROR(iree_vm_ref_retain_or_move_checked(
           operand_is_move, operand, iree_vm_type_def_as_ref(type_def), result));
     });
@@ -1610,31 +1675,21 @@ static iree_status_t iree_vm_bytecode_dispatch(
     });
 
     DISPATCH_OP(CORE, CmpEQRef, {
-      bool lhs_is_move;
-      iree_vm_ref_t* lhs = VM_DecOperandRegRef("lhs", &lhs_is_move);
-      bool rhs_is_move;
-      iree_vm_ref_t* rhs = VM_DecOperandRegRef("rhs", &rhs_is_move);
+      iree_vm_ref_t* lhs = VM_DecOperandRegRef("lhs");
+      iree_vm_ref_t* rhs = VM_DecOperandRegRef("rhs");
       int32_t* result = VM_DecResultRegI32("result");
       *result = vm_cmp_eq_ref(lhs, rhs);
-      if (lhs_is_move) iree_vm_ref_release(lhs);
-      if (rhs_is_move) iree_vm_ref_release(rhs);
     });
     DISPATCH_OP(CORE, CmpNERef, {
-      bool lhs_is_move;
-      iree_vm_ref_t* lhs = VM_DecOperandRegRef("lhs", &lhs_is_move);
-      bool rhs_is_move;
-      iree_vm_ref_t* rhs = VM_DecOperandRegRef("rhs", &rhs_is_move);
+      iree_vm_ref_t* lhs = VM_DecOperandRegRef("lhs");
+      iree_vm_ref_t* rhs = VM_DecOperandRegRef("rhs");
       int32_t* result = VM_DecResultRegI32("result");
       *result = vm_cmp_ne_ref(lhs, rhs);
-      if (lhs_is_move) iree_vm_ref_release(lhs);
-      if (rhs_is_move) iree_vm_ref_release(rhs);
     });
     DISPATCH_OP(CORE, CmpNZRef, {
-      bool operand_is_move;
-      iree_vm_ref_t* operand = VM_DecOperandRegRef("operand", &operand_is_move);
+      iree_vm_ref_t* operand = VM_DecOperandRegRef("operand");
       int32_t* result = VM_DecResultRegI32("result");
       *result = vm_cmp_nz_ref(operand);
-      if (operand_is_move) iree_vm_ref_release(operand);
     });
 
     //===------------------------------------------------------------------===//
@@ -1976,8 +2031,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       //===----------------------------------------------------------------===//
 
       DISPATCH_OP(EXT_F32, ListGetF32, {
-        bool list_is_move;
-        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
         iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
         if (IREE_UNLIKELY(!list)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -1991,8 +2045,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       });
 
       DISPATCH_OP(EXT_F32, ListSetF32, {
-        bool list_is_move;
-        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
         iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
         if (IREE_UNLIKELY(!list)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -2150,9 +2203,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       //===----------------------------------------------------------------===//
 
       DISPATCH_OP(EXT_F32, BufferFillF32, {
-        bool buffer_is_move;
-        iree_vm_ref_t* buffer_ref =
-            VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+        iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
         iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
         if (IREE_UNLIKELY(!buffer)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2165,9 +2216,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       });
 
       DISPATCH_OP(EXT_F32, BufferLoadF32, {
-        bool buffer_is_move;
-        iree_vm_ref_t* buffer_ref =
-            VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+        iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
         iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
         if (IREE_UNLIKELY(!buffer)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2179,9 +2228,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       });
 
       DISPATCH_OP(EXT_F32, BufferStoreF32, {
-        bool buffer_is_move;
-        iree_vm_ref_t* buffer_ref =
-            VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+        iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
         iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
         if (IREE_UNLIKELY(!buffer)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2271,8 +2318,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       //===----------------------------------------------------------------===//
 
       DISPATCH_OP(EXT_F64, ListGetF64, {
-        bool list_is_move;
-        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
         iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
         if (IREE_UNLIKELY(!list)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -2286,8 +2332,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       });
 
       DISPATCH_OP(EXT_F64, ListSetF64, {
-        bool list_is_move;
-        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list", &list_is_move);
+        iree_vm_ref_t* list_ref = VM_DecOperandRegRef("list");
         iree_vm_list_t* list = iree_vm_list_deref(*list_ref);
         if (IREE_UNLIKELY(!list)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "list is null");
@@ -2455,9 +2500,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       //===----------------------------------------------------------------===//
 
       DISPATCH_OP(EXT_F64, BufferFillF64, {
-        bool buffer_is_move;
-        iree_vm_ref_t* buffer_ref =
-            VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+        iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
         iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
         if (IREE_UNLIKELY(!buffer)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2470,9 +2513,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       });
 
       DISPATCH_OP(EXT_F64, BufferLoadF64, {
-        bool buffer_is_move;
-        iree_vm_ref_t* buffer_ref =
-            VM_DecOperandRegRef("source_buffer", &buffer_is_move);
+        iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("source_buffer");
         iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
         if (IREE_UNLIKELY(!buffer)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -2484,9 +2525,7 @@ static iree_status_t iree_vm_bytecode_dispatch(
       });
 
       DISPATCH_OP(EXT_F64, BufferStoreF64, {
-        bool buffer_is_move;
-        iree_vm_ref_t* buffer_ref =
-            VM_DecOperandRegRef("target_buffer", &buffer_is_move);
+        iree_vm_ref_t* buffer_ref = VM_DecOperandRegRef("target_buffer");
         iree_vm_buffer_t* buffer = iree_vm_buffer_deref(*buffer_ref);
         if (IREE_UNLIKELY(!buffer)) {
           return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,

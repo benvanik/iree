@@ -213,6 +213,14 @@ IREE_API_EXPORT void iree_vm_ref_release(iree_vm_ref_t* ref) {
   IREE_VM_REF_ASSERT(ref);
   iree_vm_ref_t temp_ref = *ref;
   if (temp_ref.type == IREE_VM_REF_TYPE_NULL || temp_ref.ptr == NULL) return;
+#if defined(IREE_VM_REF_DEBUG_MOVE)
+  // In debug move mode, poisoned refs from moved-from registers are cleaned up
+  // during frame cleanup. Just clear them without trying to release.
+  if (temp_ref.type == IREE_VM_REF_TYPE_POISONED) {
+    memset(ref, 0, sizeof(*ref));
+    return;
+  }
+#endif  // IREE_VM_REF_DEBUG_MOVE
 
   iree_vm_ref_trace("RELEASE", ref);
   iree_atomic_ref_count_t* counter = iree_vm_get_ref_counter_ptr(&temp_ref);
@@ -265,7 +273,15 @@ IREE_API_EXPORT void iree_vm_ref_move(iree_vm_ref_t* ref,
 
   // Reset input ref so it points at nothing.
   iree_vm_ref_t src_ref = *ref;
+#if defined(IREE_VM_REF_DEBUG_MOVE)
+  // Poison the source ref with a sentinel value to detect use-after-move.
+  // If the compiler incorrectly marked this as a last-use when it's actually
+  // used again, the next access will see this poison value and assert.
+  ref->ptr = (void*)(uintptr_t)IREE_VM_REF_TYPE_POISONED;
+  ref->type = IREE_VM_REF_TYPE_POISONED;
+#else
   memset(ref, 0, sizeof(*ref));
+#endif  // IREE_VM_REF_DEBUG_MOVE
 
   iree_vm_ref_t dst_ref = *out_ref;
   if (dst_ref.ptr != NULL) {

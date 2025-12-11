@@ -13,6 +13,7 @@
 #include "iree/base/api.h"
 #include "iree/vm/bytecode/module_impl.h"
 #include "iree/vm/bytecode/utils/isa.h"
+#include "iree/vm/ref.h"
 
 //===----------------------------------------------------------------------===//
 // Shared data structures
@@ -199,10 +200,27 @@ static inline const iree_vm_register_remap_list_t* VM_DecBranchOperandsImpl(
 #define VM_DecOperandRegF64(name)   \
   *((double*)&regs_i32[OP_I16(0)]); \
   pc += IREE_REGISTER_ORDINAL_SIZE;
-#define VM_DecOperandRegRef(name, out_is_move)                      \
-  &regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK];                    \
-  *(out_is_move) = 0; /*= OP_I16(0) & IREE_REF_REGISTER_MOVE_BIT;*/ \
+// Base macro - no MOVE bit decoding (for ops that don't support MOVE).
+#define VM_DecOperandRegRef(name)                \
+  &regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK]; \
   pc += IREE_REGISTER_ORDINAL_SIZE;
+// Move variant - decodes MOVE bit (for ops that support ownership transfer).
+#if defined(IREE_VM_REF_DEBUG_MOVE)
+#define VM_DecOperandRegRefMove(name, out_is_move)                         \
+  &regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK];                           \
+  IREE_ASSERT_NE(regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK].type,        \
+                 IREE_VM_REF_TYPE_POISONED,                                \
+                 "use-after-move: ref register was accessed after being "  \
+                 "moved - the compiler incorrectly marked a non-last-use " \
+                 "as MOVE");                                               \
+  *(out_is_move) = OP_I16(0) & IREE_REF_REGISTER_MOVE_BIT;                 \
+  pc += IREE_REGISTER_ORDINAL_SIZE;
+#else
+#define VM_DecOperandRegRefMove(name, out_is_move)         \
+  &regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK];           \
+  *(out_is_move) = OP_I16(0) & IREE_REF_REGISTER_MOVE_BIT; \
+  pc += IREE_REGISTER_ORDINAL_SIZE;
+#endif  // IREE_VM_REF_DEBUG_MOVE
 #define VM_DecVariadicOperands(name) \
   VM_DecVariadicOperandsImpl(bytecode_data, &pc)
 static inline const iree_vm_register_list_t* VM_DecVariadicOperandsImpl(
@@ -226,9 +244,14 @@ static inline const iree_vm_register_list_t* VM_DecVariadicOperandsImpl(
 #define VM_DecResultRegF64(name)   \
   ((double*)&regs_i32[OP_I16(0)]); \
   pc += IREE_REGISTER_ORDINAL_SIZE;
-#define VM_DecResultRegRef(name, out_is_move)                       \
-  &regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK];                    \
-  *(out_is_move) = 0; /*= OP_I16(0) & IREE_REF_REGISTER_MOVE_BIT;*/ \
+// Base macro - no MOVE bit decoding (for ops that don't support MOVE).
+#define VM_DecResultRegRef(name)                 \
+  &regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK]; \
+  pc += IREE_REGISTER_ORDINAL_SIZE;
+// Move variant - decodes MOVE bit (for ops that support ownership transfer).
+#define VM_DecResultRegRefMove(name, out_is_move)          \
+  &regs_ref[OP_I16(0) & IREE_REF_REGISTER_MASK];           \
+  *(out_is_move) = OP_I16(0) & IREE_REF_REGISTER_MOVE_BIT; \
   pc += IREE_REGISTER_ORDINAL_SIZE;
 #define VM_DecVariadicResults(name) VM_DecVariadicOperands(name)
 
