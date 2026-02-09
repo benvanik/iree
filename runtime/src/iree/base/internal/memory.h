@@ -110,6 +110,7 @@ void iree_memory_protect_sensitive(void* ptr, iree_host_size_t size);
 //   Linux/Android/BSD:    explicit_bzero
 //   Other platforms:      volatile writes with memory barrier
 //
+
 // Use immediately before freeing memory that contained secrets (keys, tokens).
 // Note: This does not guarantee the data is unrecoverable from physical memory
 // or swap; use iree_memory_lock to prevent swapping of sensitive regions.

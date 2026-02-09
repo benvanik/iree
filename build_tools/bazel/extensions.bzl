@@ -81,11 +81,25 @@ def _iree_extension_impl(module_ctx):
         path = "third_party/hsa-runtime-headers",
     )
 
+    # RDMA core headers
+    new_local_repository(
+        name = "rdma_core_headers",
+        build_file = "@iree_core//:build_tools/third_party/rdma-core-headers/BUILD.overlay",
+        path = "third_party/rdma-core-headers",
+    )
+
     # WebGPU headers
     new_local_repository(
         name = "webgpu_headers",
         build_file = "@iree_core//:build_tools/third_party/webgpu-headers/BUILD.overlay",
         path = "third_party/webgpu-headers",
+    )
+
+    # Monocypher cryptographic library
+    new_local_repository(
+        name = "monocypher",
+        build_file = "@iree_core//:build_tools/third_party/monocypher/BUILD.overlay",
+        path = "third_party/monocypher",
     )
 
     # CUDA auto-configuration

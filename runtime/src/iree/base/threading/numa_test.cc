@@ -128,8 +128,12 @@ TEST(NumaTest, BindMemoryBasic) {
   }
 
   status = iree_numa_bind_memory(ptr, 4096, IREE_NUMA_NODE_ANY);
+<<<<<<< HEAD
   if (iree_status_code(status) == IREE_STATUS_PERMISSION_DENIED ||
       iree_status_code(status) == IREE_STATUS_UNIMPLEMENTED) {
+=======
+  if (iree_status_code(status) == IREE_STATUS_PERMISSION_DENIED) {
+>>>>>>> 2def5687ec21 (Add IREE remoting infrastructure)
     iree_status_ignore(status);
   } else {
     IREE_ASSERT_OK(status);
